@@ -28,3 +28,8 @@ desktop.ini
 
 # 自检中间产物
 .selfcheck/
+
+# 排查用临时文件
+_rid.txt
+_logs.zip
+*.tar
