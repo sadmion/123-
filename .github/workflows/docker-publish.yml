@@ -39,9 +39,10 @@ jobs:
       # 直接用 buildx 构建，标签在这里显式拼装，避免多行 metadata 输出
       # 在 shell 里被拆分导致脚本解析异常的坑。
       - name: 构建并推送
+        id: build
         shell: bash
         run: |
-          set -euxo pipefail
+          set -o pipefail
           IMAGE="${REGISTRY}/${GITHUB_REPOSITORY}"
 
           # 版本标签：优先取 git tag（v1.0.3 → 1.0.3），分支构建则用 short sha
@@ -51,17 +52,66 @@ jobs:
             VERSION="sha-${GITHUB_SHA::7}"
           fi
 
+          echo "IMAGE   = ${IMAGE}"
+          echo "VERSION = ${VERSION}"
+          echo "--- docker buildx ls ---"
+          docker buildx ls
+          echo "--- 开始构建 ---"
+
+          # 把构建输出完整落盘，无论成败都留档供诊断
+          set +e
           docker buildx build \
             --file docker/Dockerfile \
             --platform linux/amd64,linux/arm64 \
             --tag "${IMAGE}:${VERSION}" \
             --tag "${IMAGE}:latest" \
             --push \
-            .
+            . 2>&1 | tee /tmp/build.log
+          BUILD_RC=${PIPESTATUS[0]}
+          set -e
 
-      - name: 校验镜像已发布
+          echo "构建退出码: ${BUILD_RC}"
+          exit ${BUILD_RC}
+
+      # 失败时把构建日志尾部发布为 commit comment。
+      # 该接口可匿名读取（GET /repos/{o}/{r}/commits/{sha}/comments），
+      # 便于在无法访问 Actions 日志时定位问题。
+      - name: 失败时归档日志
+        if: failure()
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -eu
-          echo "镜像已推送，标签如下："
-          echo "  ${REGISTRY}/${GITHUB_REPOSITORY}:latest"
+          set +e
+          BODY=$(tail -100 /tmp/build.log 2>/dev/null)
+          if [ -z "$BODY" ]; then
+            BODY=$(tail -100 /tmp/run.log 2>/dev/null)
+          fi
+          if [ -z "$BODY" ]; then
+            BODY="(构建步骤未产生日志文件)"
+          fi
+          echo "--- 日志尾部（本步骤 stdout）---"
+          echo "$BODY"
+          BODY="$BODY" python3 - <<'PY'
+          import json, os
+          body = os.environ.get("BODY", "")
+          data = {"body": "```\n" + body[-60000:] + "\n```\n\n构建失败，以上为日志尾部。"}
+          open("/tmp/comment.json", "w", encoding="utf-8").write(json.dumps(data))
+          print("comment payload 字节数:", len(json.dumps(data)))
+          PY
+          curl -s -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" \
+            -d @/tmp/comment.json \
+            -o /dev/null -w "发布 commit comment HTTP %{http_code}\n"
+
+      - name: 上传构建日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            /tmp/build.log
+            /tmp/run.log
+          if-no-files-found: ignore
