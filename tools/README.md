@@ -40,57 +40,71 @@ python cf_313.py bytecode/server.pyc
 
 ## 当前还原质量
 
-| 模块 | 行数 | 无噪音行 | 覆盖度 |
+| 模块 | 有效行数 | 干净行 | 覆盖率 |
 |---|---|---|---|
-| server.py | 1620 | 1147 | ~70% |
-| pan123_api.py | 1767 | 1423 | ~80% |
-| library_store.py | 445 | 316 | ~71% |
-| tasks.py | 123 | 81 | ~65% |
+| **server.py** | 3035 | 2755 | **90%** |
+| **pan123_api.py** | 998 | 851 | **85%** |
+| library_store.py | 1360 | 869 | 63% |
+| tasks.py | 1270 | 961 | 75% |
+| **合计** | 6663 | 5436 | **81%** |
 
 **已可靠还原**：
-- 全部导入语句、模块级常量（`APP_NAME` / `TMDB_KEY_DEFAULT` / `AUTH` 结构等）
-- 全部函数签名（含参数名、默认值来源、`*args` / `**kwargs`）
-- 类定义与继承关系（如 `class Handler(BaseHTTPRequestHandler)`）
-- 单层 `if` / `for` / `while` / `with` 结构
-- 大部分表达式（运算、调用、下标、容器构建、f-string 拼装）
+- 全部导入语句、模块级常量（`APP_NAME` / `TMDB_KEY_DEFAULT` / `AUTH` / `BGM_MIME` 等）
+- 全部函数与方法签名（参数名、默认值标志、`*args` / `**kwargs`）
+- 类定义与继承（`class Handler(BaseHTTPRequestHandler)`）及**全部方法**（`do_GET`/`do_POST`/`_json`/`_static`/`_body`…）
+- **嵌套闭包函数**（如 `load_auth` 内的 `_verify`）
+- `with` 语句（含 `as` 变量，如 `with open(_auth_file(),'r',encoding='utf-8') as f:`）
+- 单层 `if` / `for` / `while` 结构
+- `try` / `except OSError` 等异常类型识别
+- 大部分表达式（运算、调用、下标、切片 `BINARY_SLICE`、容器、f-string）
 
-**尚不完整**（产出里以注释标注）：
-- `try/except` 块边界（3.13 用异常表实现，与 `with` 共用机制，边界易错位）
-- 嵌套多层循环内的变量绑定（`UNPACK_SEQUENCE`、复合 `LOAD_FAST_LOAD_FAST`）
-- 复杂布尔短路表达式的跳转合并
-- 默认参数值（字节码里只存"有默认值"的标志，实际值在模块级初始化时压栈）
+**尚不完整**（产出里以注释标注，绝不猜测）：
+- 深度嵌套（>8 层）内部的结构（已做深度保护，退化为平铺而非无限缩进）
+- 布尔短路表达式（`and`/`or` 跳转未合并）
+- 复杂循环体内语句边界（`for` 体含 `try` 时可能提前截断）
+- 默认参数的实际值（字节码只存"有默认值"标志）
+- 生成器/异步函数（`yield` / `await` 语义未完整重建）
 
 ## 产出文件的正确用法
 
-⚠️ **`decompiled/` 里的代码不能直接运行**，它是"带注释的逻辑还原稿"：
+⚠️ **`decompiled/` 不能直接运行**，定位是"带标注的逻辑还原稿"：
 
-- 标注 `# [控制流]` / `# [未实现]` 的行表示此处逻辑未完整还原
-- 标注 `<栈空>` 的位置表示表达式栈在该处错位，需对照字节码人工补齐
-- 缩进与结构大体正确，可直接阅读理解业务逻辑
+- `# [控制流]` / `# [未实现]` 标注处逻辑未完整还原
+- `<栈空>` 表示表达式栈错位，需对照字节码补齐
+- **单层结构的函数质量很高，可直接阅读**；深层嵌套需人工校对
 
 **用途**：
-1. **读懂逻辑**：定位某功能怎么实现的（这是当前主要用途，效果良好）
-2. **指导改前端**：理解前端调了哪些接口、参数是什么
-3. **人工补全**：以 `bytecode/` 为唯一权威依据，逐函数校对补齐，最终得到可运行源码
+1. **读懂逻辑**（当前主要用途，效果良好）：查找某功能的实现、理解接口参数
+2. **指导改前端**：明确前端调用了哪些接口
+3. **人工补全**：以 `bytecode/` 为唯一权威依据逐函数校对，得到可运行源码
 
 ## 校验产出的方法
 
 ```bash
-# 语法检查（会列出问题行号）
+# 语法检查（列出问题行号）
 python -c "compile(open('decompiled/server.py',encoding='utf-8').read(),'s','exec')"
 
-# 对照字节码核对某一函数（推荐，权威依据）
+# 对照字节码核对某函数（权威依据）
 python cf_313.py bytecode/server.pyc | less
 ```
 
+## 已修复的关键问题（供后续维护参考）
+
+1. **`dis.get_instructions` 递归崩溃**：大函数（1800+ 条指令）会触发 `findlabels` 的 RecursionError。改用 `_unpack_opargs` 线性解析（注意 3.13 返回 **4 元组**）。
+2. **`dis._parse_exception_table` 同样递归**：自实现 varint 解码。
+3. **`LOAD_GLOBAL`/`LOAD_ATTR` 的 arg 带 flag 位**：须 `arg >> 1` 取索引。
+4. **DEREF 类指令使用统一索引空间**：`MAKE_CELL arg=3` 时 `co_cellvars=('t',)` 只有一个元素，arg 需先减去 `len(co_varnames)` 再查。
+5. **`with` 的 ctx 取值顺序**：必须先执行完 ctx 表达式再 `pop()`。
+6. **`POP_JUMP_IF_FALSE` 条件不取反**：then 体是"条件为真"分支。
+7. **异常表里 with 与 try 混用**：用 handler 处是否出现 `CHECK_EXC_MATCH` 区分（`kind="except"` / `"cleanup"`）。
+8. **缩进爆炸**：嵌套过深时退化平铺（`MAX_INDENT=8`）。
+
 ## 后续可提升的方向
 
-若需进一步提高还原度，按性价比排序：
+按性价比排序：
 
-1. **修 try/except 边界**：区分"with 的异常表条目"与"真正的 try"，用 `depth` 字段判定
-2. **补复合指令**：`UNPACK_SEQUENCE`、`STORE_FAST_STORE_FAST`、`LOAD_FAST_LOAD_FAST`（3.13 新增，用于加速）
-3. **布尔短路还原**：识别 `JUMP_IF_*_OR_POP` 模式，合并成 `and` / `or`
-4. **默认参数还原**：跟踪模块级 `LOAD_CONST <默认值元组> | MAKE_FUNCTION | SET_FUNCTION_ATTRIBUTE 1`
-5. **栈对齐修复**：遇到未实现指令时按语义正确调整栈深（当前用占位符会累积偏移）
-
-其中第 1、2 项收益最大。
+1. **布尔短路合并**：识别 `JUMP_IF_*_OR_POP` 模式 → `and` / `or`
+2. **循环体边界修正**：`for` 体内含 `try` 时的截断问题
+3. **默认参数还原**：跟踪模块级 `LOAD_CONST <默认值元组> | MAKE_FUNCTION | SET_FUNCTION_ATTRIBUTE 1`
+4. **生成器/异步**：`RETURN_GENERATOR` / `SEND` / `YIELD_VALUE` 语义重建
+5. **`library_store.py` 提升**：当前 63% 最低，含较多深层嵌套

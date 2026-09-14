@@ -33,6 +33,7 @@ from decompiler_313 import Frame, render_func, render_class, Bail  # noqa
 # dis.get_instructions / _parse_exception_table 在超大函数上开销大，做缓存
 _INSN_CACHE = {}
 _TRY_CACHE = {}
+_RENDERED = set()        # 已渲染过的嵌套代码对象 id，防重复展开
 
 
 try:
@@ -90,11 +91,20 @@ def clean_ins(code):
                 try:
                     if op in _op.hasconst:
                         argval = code.co_consts[arg]
+                    elif op in _op.hasfree:
+                        # ⚠️ 3.13 的 DEREF 类指令（含 MAKE_CELL）使用**统一索引空间**：
+                        # arg 先指向 co_varnames 段，超出后才落到 cellvars/freevars。
+                        # 实测：load_auth 的 co_cellvars=('t',) 而 MAKE_CELL arg=3，
+                        # 对应 ('f','d','_verify','t')[3]。只查 cellvars 会取不到。
+                        nv = len(code.co_varnames)
+                        if arg < nv:
+                            argval = code.co_varnames[arg]
+                        else:
+                            names = (code.co_cellvars + code.co_freevars)
+                            k2 = arg - nv
+                            argval = names[k2] if 0 <= k2 < len(names) else arg
                     elif op in _op.haslocal:
                         argval = code.co_varnames[arg]
-                    elif op in _op.hasfree:
-                        names = (code.co_cellvars + code.co_freevars)
-                        argval = names[arg] if arg < len(names) else arg
                     elif op in _op.hasname:
                         # LOAD_GLOBAL / LOAD_ATTR 在 3.11+ 的 arg 低位带 flag
                         idx = (arg >> 1) if nm in ("LOAD_GLOBAL", "LOAD_ATTR",
@@ -130,16 +140,21 @@ def _parse_varint(iterator):
 
 
 def parse_try(code):
-    """独立解析 co_exceptiontable。
+    """独立解析 co_exceptiontable，并区分「真正的 try/except」与「with 清理」。
 
     不调用 dis._parse_exception_table —— 后者内部会构建标签映射并递归，
     在本项目的大函数（1800+ 条指令）上会触发 RecursionError。
     这里用纯 varint 解码，零递归。
+
+    返回条目列表：(start, end, target, depth, kind)
+      kind="except"  target 处是 CHECK_EXC_MATCH，即真正的 except 处理
+      kind="cleanup" 其余（with 的 __exit__ 清理、re-raise 等），不应还原成 try
     """
     key = id(code)
     if key in _TRY_CACHE:
         return _TRY_CACHE[key]
-    r = []
+
+    raw = []
     try:
         it = iter(code.co_exceptiontable)
         while True:
@@ -147,11 +162,30 @@ def parse_try(code):
             length = _parse_varint(it) * 2
             target = _parse_varint(it) * 2
             dl = _parse_varint(it)
-            r.append((start, start + length, target, dl >> 1))
+            raw.append((start, start + length, target, dl >> 1))
     except StopIteration:
         pass
     except Exception:
-        r = []
+        raw = []
+
+    # 建立 偏移 -> 指令 的映射，用于判断 handler 是否为 except
+    try:
+        ins_map = {i.offset: i.opname for i in clean_ins(code)}
+    except Exception:
+        ins_map = {}
+
+    def kind_of(target):
+        """handler 首指令是 PUSH_EXC_INFO，紧跟着若出现 CHECK_EXC_MATCH
+        即为显式 except X；否则是 with 清理或裸 re-raise。"""
+        seq = []
+        for off in sorted(ins_map):
+            if off >= target:
+                seq.append(ins_map[off])
+            if len(seq) >= 6:
+                break
+        return "except" if "CHECK_EXC_MATCH" in seq else "cleanup"
+
+    r = [(s, e, t, d, kind_of(t)) for (s, e, t, d) in raw]
     _TRY_CACHE[key] = r
     return r
 
@@ -204,6 +238,51 @@ class StructGen:
             self.exec_one(self.ins[k], lv)
 
     # ---------------------------------------------------------- with
+    def gen_nested_def(self, k, hi):
+        """函数体/类体内的嵌套 def（含闭包）。
+
+        模式：LOAD_CONST <CODE> | MAKE_FUNCTION | [SET_FUNCTION_ATTRIBUTE n] | STORE_*
+        闭包情形前面还会有 LOAD_CLOSURE/BUILD_TUPLE 压入 cell 元组，
+        这里统一按「忽略闭包样板，直接生成 def」处理（语义等价）。
+        """
+        code_obj = self.ins[k].argval
+        j = k + 1
+        while j < hi and self.ins[j].opname in (
+                "MAKE_FUNCTION", "SET_FUNCTION_ATTRIBUTE", "COPY"):
+            j += 1
+        if j >= hi or self.ins[j].opname not in ("STORE_FAST", "STORE_NAME",
+                                                 "STORE_DEREF", "STORE_GLOBAL"):
+            return k          # 不是定义语句（可能是 lambda 等），交回常规流程
+        fname = self.ins[j].argval or code_obj.co_name
+        # 防重复：同一代码对象只渲染一次（嵌套层级里可能被多次看到）
+        key = id(code_obj)
+        if key in _RENDERED:
+            for x in range(k, j + 1):
+                self.handled.add(self.ins[x].offset)
+            return j + 1
+        _RENDERED.add(key)
+        for line in render_func_struct(fname, code_obj, indent=self.indent):
+            self.lines.append(line)
+        self.lines.append("")
+        for x in range(k, j + 1):
+            self.handled.add(self.ins[x].offset)
+        return j + 1
+
+    def near_with(self, k, span=14):
+        """向后探查：本语句是否是 with 的起点。
+
+        判据：在碰到「会终结表达式」的指令前出现 BEFORE_WITH。
+        """
+        for j in range(k, min(k + span, len(self.ins))):
+            nm = self.ins[j].opname
+            if nm in ("BEFORE_WITH", "BEFORE_ASYNC_WITH"):
+                return True
+            if nm in ("STORE_FAST", "STORE_NAME", "POP_TOP", "RETURN_VALUE",
+                      "RETURN_CONST", "FOR_ITER", "STORE_ATTR",
+                      "STORE_SUBSCR", "STORE_DEREF"):
+                return False
+        return False
+
     def gen_with(self, k, hi):
         """还原 with 语句。
 
@@ -215,16 +294,16 @@ class StructGen:
             <清理指令>
         """
         ins = self.ins[k]
-        # BEFORE_WITH 之前，上下文表达式已在栈上
-        ctx = self.frame.pop()
-        # 找到 BEFORE_WITH 位置并取 as 变量
+        # 先把 ctx 表达式完整求值（执行到 BEFORE_WITH 为止），再取栈顶。
+        # 注意顺序：不能在求值前 pop，否则取到的是上层遗留值。
         j = k
-        while j < hi and self.ins[j].opname not in ("BEFORE_WITH",
-                                                    "BEFORE_ASYNC_WITH"):
+        while j < hi and self.ins[j].opname not in (
+                "BEFORE_WITH", "BEFORE_ASYNC_WITH"):
             self.exec_one(self.ins[j])
             j += 1
         if j >= hi:
             return k + 1
+        ctx = self.frame.pop()
         self.handled.add(self.ins[j].offset)
         jj = j + 1
         var = None
@@ -240,7 +319,7 @@ class StructGen:
         # with 体：到作用域结束
         body_hi = hi
         off_now = self.ins[jj].offset if jj < len(self.ins) else None
-        for s, e, t, d in self.trys:
+        for s, e, t, d, kind in self.trys:
             if off_now is not None and s <= off_now < e:
                 body_hi = min(body_hi, self.idx_of(e, hi))
         body = self.sub(self.indent + 1)
@@ -259,10 +338,23 @@ class StructGen:
     # ---------------------------------------------------------- 主流程
     def run(self, lo=0, hi=None):
         hi = len(self.ins) if hi is None else hi
+        # 深度保护：嵌套过深时退化为平铺，避免缩进爆炸
+        too_deep = self.indent >= self.MAX_INDENT
         k = lo
         while k < hi:
             ins = self.ins[k]
             if ins.offset in self.handled:
+                k += 1
+                continue
+
+            if too_deep:
+                # 只还原表达式与简单语句，不再拆分控制流结构
+                if ins.opname.startswith(("POP_JUMP", "JUMP")) or \
+                        ins.opname == "FOR_ITER":
+                    self.handled.add(ins.offset)
+                    k += 1
+                    continue
+                self.exec_one(ins)
                 k += 1
                 continue
 
@@ -273,10 +365,16 @@ class StructGen:
                     k = nk
                     continue
 
-            # ---- with 语句：下一条是 BEFORE_WITH
-            if (k + 1 < len(self.ins)
-                    and self.ins[k + 1].opname in ("BEFORE_WITH",
-                                                   "BEFORE_ASYNC_WITH")):
+            # ---- 嵌套 def / lambda：LOAD_CONST <code> | MAKE_FUNCTION | STORE
+            if (ins.opname == "LOAD_CONST"
+                    and isinstance(ins.argval, types.CodeType)):
+                nk = self.gen_nested_def(k, hi)
+                if nk > k:
+                    k = nk
+                    continue
+
+            # ---- with 语句：向后探查若干条指令内是否出现 BEFORE_WITH
+            if self.near_with(k):
                 nk = self.gen_with(k, hi)
                 if nk > k:
                     k = nk
@@ -303,35 +401,45 @@ class StructGen:
 
     # ---------------------------------------------------------- try 判定
     def is_try_entry(self, k):
+        """只把「真正的 except」作用域当作 try 入口。
+
+        with 语句在 3.13 也用异常表实现清理，其条目 kind="cleanup"，
+        必须排除，否则每个 with 都会被还原成 try，产出大量噪音。
+        """
         off = self.ins[k].offset
         if off in self.consumed_try:
             return False
-        # 该区间若以 with 开始，交给普通语句处理（with 有自己的还原路径）
-        for s, e, t, d in self.trys:
+        for s, _e, _t, _d, kind in self.trys:
             if s == off:
-                if self._range_has_with(k):
-                    return False
-                return True
+                return kind == "except"
         return False
 
-    def _range_has_with(self, k):
-        """判断接下来几条指令是否构成 with（BEFORE_WITH 在区间内）。"""
-        for j in range(k, min(k + 12, len(self.ins))):
-            nm = self.ins[j].opname
-            if nm in ("BEFORE_WITH", "BEFORE_ASYNC_WITH"):
-                return True
-            if nm in ("CALL", "CALL_KW", "POP_TOP") and j > k + 6:
-                break
-        return False
+    def exc_type_at(self, handler_off):
+        """从 handler 指令序列里取异常类型（CHECK_EXC_MATCH 前压入的名字）。"""
+        seq = [i for i in self.ins if i.offset >= handler_off][:8]
+        for idx, x in enumerate(seq):
+            if x.opname == "CHECK_EXC_MATCH":
+                for y in reversed(seq[:idx]):
+                    if y.opname in ("LOAD_GLOBAL", "LOAD_NAME", "LOAD_FAST"):
+                        return y.argval
+                    if y.opname == "BUILD_TUPLE":
+                        return "Exception"
+        return "Exception"
 
     # ---------------------------------------------------------- 子帧辅助
     def sub(self, indent):
         """派生子帧，继承当前表达式栈状态（关键：不能重置栈）；
-        并继承"已消费的 try 入口"，避免处理 try 体时无限递归。"""
+        并继承「已消费的 try 入口」，避免处理 try 体时无限递归。
+
+        缩进深度保护：复杂嵌套会让缩进层数爆炸（实测出现过几十层 \t），
+        超过 MAX_INDENT 时不再继续拆分结构，直接平铺并标注，保证产出可读。
+        """
         s = StructGen(self.code, indent=indent)
         s.frame.stack = self.frame.stack[:]
         s.consumed_try = set(self.consumed_try)
         return s
+
+    MAX_INDENT = 8
 
     def adopt(self, s):
         """把子帧产出的行接过来，并把栈状态回写（保持连续性）。"""
@@ -360,13 +468,17 @@ class StructGen:
             self.handled.add(self.ins[kk].offset)
             kk += 1
         self.out("for %s in %s:" % (var, it))
-        # 循环体：直到回跳指令
+        # 循环体边界：找**回跳到本 FOR_ITER 的那条** JUMP_BACKWARD。
+        # 不能见到 JUMP_BACKWARD 就停 —— try/except 内部常有内层回跳，
+        # 会导致循环体被提前截断、后续语句错位到循环外。
         body_lo = kk
         body_hi = body_lo
+        target_off = self.ins[k].offset
         while body_hi < len(self.ins):
             x = self.ins[body_hi]
-            if x.opname.startswith("JUMP_BACKWARD"):
+            if x.opname.startswith("JUMP_BACKWARD") and x.argval == target_off:
                 break
+            # 若跳到更靠后的位置（内层循环），跳过它继续找本层回跳
             body_hi += 1
         body = self.sub(self.indent + 1)
         body.run(body_lo, body_hi)
@@ -394,14 +506,16 @@ class StructGen:
         ins = self.ins[k]
         target_off = ins.argval
         cond = self.frame.pop()
-        neg = ins.opname in ("POP_JUMP_IF_FALSE", "POP_JUMP_IF_NONE",
-                             "POP_JUMP_IF_NOT_NONE")
-        if ins.opname == "POP_JUMP_IF_NONE":
-            cond = "(%s is None)" % cond
+        # POP_JUMP_IF_FALSE tgt 的语义：条件为假 → 跳 tgt。
+        # 而 then 体位于 (k, tgt) 之间，即"条件为真时执行"，
+        # 所以条件表达式**不需要取反**，直接输出 if cond: 即可。
+        # （取反会把 if 与 else 分支弄反，导致整块缩进错位）
+        if ins.opname == "POP_JUMP_IF_TRUE":
+            cond = "not (%s)" % cond          # 真则跳走 → then 是"假"分支
+        elif ins.opname == "POP_JUMP_IF_NONE":
+            cond = "(%s is not None)" % cond  # None 则跳走 → then 是"非 None"
         elif ins.opname == "POP_JUMP_IF_NOT_NONE":
-            cond = "(%s is not None)" % cond
-        if neg and ins.opname == "POP_JUMP_IF_FALSE":
-            cond = "not (%s)" % cond
+            cond = "(%s is None)" % cond
 
         # then 分支结束位置
         then_lo = k + 1
@@ -443,15 +557,19 @@ class StructGen:
 
     # ---------------------------------------------------------- try
     def gen_try(self, k, hi):
-        """依据异常表生成 try/except。
+        """还原 try/except。
 
-        简化策略：找到当前指令所属的最小 try 作用域，
-        输出 try 体与 except 体。
+        3.13 的 except 样板（handler 处）：
+            PUSH_EXC_INFO | LOAD_GLOBAL <Exc> | CHECK_EXC_MATCH
+            | POP_JUMP_IF_FALSE <not_matched> | POP_TOP
+            ...except 体...
+            POP_EXCEPT | RETURN_CONST/JUMP...
+            <not_matched>: RERAISE / COPY 3 | POP_EXCEPT | RERAISE 1
         """
         off = self.ins[k].offset
         scope = None
-        for s, e, t, d in self.trys:
-            if s <= off < e:
+        for s, e, t, d, kind in self.trys:
+            if s <= off < e and kind == "except":
                 if scope is None or (e - s) < (scope[1] - scope[0]):
                     scope = (s, e, t, d)
         if scope is None:
@@ -460,30 +578,65 @@ class StructGen:
         offs = [x.offset for x in self.ins]
         if s not in offs or t not in offs:
             return k + 1
-        ti, hi_off = offs.index(s), offs.index(t)
+        ti, h_off = offs.index(s), offs.index(t)
         if ti != k:
             return k + 1
-        self.consumed_try.add(s)      # 标记，防止子帧重复处理
+
+        exc = self.exc_type_at(self.ins[h_off].offset)
+        self.consumed_try.add(s)
+
+        # ---- try 体：handler 之前的清理样板要去掉
+        try_hi = h_off
         self.out("try:")
         tb = self.sub(self.indent + 1)
         tb.consumed_try.add(s)
-        tb.run(ti, hi_off)
+        tb.run(ti, try_hi)
         self.adopt(tb)
-        self.out("except Exception:")
-        # handler 体：到下一个 try 作用域起点或区间末尾
-        h_hi = hi
-        for s2, _e2, _t2, _d2 in self.trys:
-            if s2 in offs and offs.index(s2) > hi_off:
-                h_hi = min(h_hi, offs.index(s2))
-        if h_hi <= hi_off:
-            h_hi = min(hi, hi_off + 40)
-        hb = self.sub(self.indent + 1)
-        hb.consumed_try.add(s)
-        hb.run(hi_off, h_hi)
-        self.adopt(hb)
-        for j in range(ti, h_hi):
+
+        # ---- except 体：跳过 PUSH_EXC_INFO / CHECK_EXC_MATCH 等样板
+        j = h_off
+        while j < hi and j < len(self.ins):
+            nm = self.ins[j].opname
+            if nm in ("PUSH_EXC_INFO", "CHECK_EXC_MATCH", "POP_TOP",
+                      "COPY", "POP_EXCEPT", "RERAISE"):
+                j += 1
+                continue
+            if nm in ("LOAD_GLOBAL", "LOAD_NAME", "LOAD_FAST", "BUILD_TUPLE"):
+                # 异常类型 + POP_JUMP_IF_FALSE 属于样板
+                nxt = self.ins[j + 1].opname if j + 1 < len(self.ins) else ""
+                nxt2 = self.ins[j + 2].opname if j + 2 < len(self.ins) else ""
+                if nxt in ("CHECK_EXC_MATCH", "BUILD_TUPLE") or \
+                   nxt2 in ("CHECK_EXC_MATCH", "POP_JUMP_IF_FALSE"):
+                    j += 1
+                    continue
+            if nm.startswith("POP_JUMP"):
+                j += 1
+                continue
+            break
+        body_lo = j
+        # except 体结束：到 POP_EXCEPT 或 JUMP 结束
+        body_hi = body_lo
+        while body_hi < hi and body_hi < len(self.ins):
+            nm = self.ins[body_hi].opname
+            if nm in ("POP_EXCEPT", "RERAISE"):
+                break
+            body_hi += 1
+        # 回退尾部样板
+        while body_hi > body_lo and self.ins[body_hi - 1].opname in (
+                "COPY", "POP_TOP", "PUSH_EXC_INFO"):
+            body_hi -= 1
+
+        self.out("except %s:" % exc)
+        eb = self.sub(self.indent + 1)
+        eb.consumed_try.add(s)
+        eb.run(body_lo, body_hi)
+        self.adopt(eb)
+
+        # 标记整段已处理
+        end = max(body_hi, h_off)
+        for j in range(ti, min(end + 1, len(self.ins))):
             self.handled.add(self.ins[j].offset)
-        return h_hi
+        return end + 1
 
 
 def render_func_struct(fname, code, indent=0):

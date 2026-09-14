@@ -121,9 +121,18 @@ class Frame:
         return self.lines
 
     def fallback(self, ins):
-        """未实现指令：标注出来，保证不静默丢失信息。"""
+        """未实现指令：标注出来，保证不静默丢失信息。
+
+        异常处理样板指令（PUSH_EXC_INFO / POP_EXCEPT / WITH_EXCEPT_START 等）
+        由 build_src 的结构化逻辑统一消费，这里静默跳过，避免刷屏噪音。
+        """
+        SILENT = {"PUSH_EXC_INFO", "POP_EXCEPT", "WITH_EXCEPT_START",
+                  "SETUP_ANNOTATIONS", "MAKE_CELL", "COPY_FREE_VARS",
+                  "RETURN_GENERATOR", "RESUME", "NOT_TAKEN"}
+        if ins.opname in SILENT:
+            return
         if is_jump(ins.opname) or ins.opname.startswith(
-                ("SETUP_", "POP_BLOCK", "RERAISE", "PUSH_EXC", "POP_EXCEPT",
+                ("SETUP_", "POP_BLOCK", "RERAISE", "POP_EXCEPT", "PUSH_EXC",
                  "WITH_EXCEPT", "BEFORE_WITH", "MAKE_FUNCTION",
                  "SET_FUNCTION_ATTRIBUTE", "BUILD_MAP", "GET_ITER",
                  "FOR_ITER", "END_FOR", "END_SEND", "GET_YIELD",
@@ -352,14 +361,25 @@ class Frame:
     i_DICT_MERGE = i_DICT_UPDATE
 
     def i_FORMAT_VALUE(self, ins):
+        """FORMAT_VALUE 的 arg 是标志位组合：
+           0x01 有转换 (1=str,2=repr,3=ascii)
+           0x02 有格式说明符（从栈上取）
+           0x04 有注解
+        """
+        conv = ins.argval & 0x03
+        has_spec = bool(ins.argval & 0x04)
+        spec = self.pop() if has_spec else None
         v = self.pop()
-        conv = {1: "!s", 2: "!r", 3: "!a"}.get(ins.argval & 0x03, "")
-        spec = ""
-        if ins.argval & 0x04:
-            spec = self.pop()
-        self.push("{%s%s}" % (v, conv))
+        c = {1: "!s", 2: "!r", 3: "!a"}.get(conv, "")
+        if spec is not None:
+            self.push("{%s%s:%s}" % (v, c, spec))
+        else:
+            self.push("{%s%s}" % (v, c))
 
-    i_FORMAT_SIMPLE = i_FORMAT_VALUE
+    def i_FORMAT_SIMPLE(self, ins):
+        """f-string 的简单插值（3.13 与 FORMAT_VALUE=0 等价）。"""
+        v = self.pop()
+        self.push("{%s}" % v)
 
     def i_CONVERT_VALUE(self, ins):
         v = self.pop()
@@ -432,6 +452,95 @@ class Frame:
 
     def i_IMPORT_STAR(self, ins):
         self.emit("from %s import *" % self.pop())
+
+    # ============================================ 3.13 复合指令与解包
+    def i_UNPACK_SEQUENCE(self, ins):
+        """序列解包：把栈顶拆成 n 个占位，后续 STORE_* 依次绑定。"""
+        src = self.pop()
+        n = ins.argval
+        for i in range(n):
+            self.push("__unpack%d_of_%d(%s)" % (i, n, src))
+
+    def i_UNPACK_EX(self, ins):
+        src = self.pop()
+        self.push("__unpack_ex(%s)" % src)
+
+    def i_STORE_FAST_STORE_FAST(self, ins):
+        """3.13 复合指令：一次存两个局部变量。"""
+        a, b = ins.argval
+        vb = self.pop(None)
+        va = self.pop(None)
+        if va is not None:
+            self.emit("%s = %s" % (a, va))
+        if vb is not None:
+            self.emit("%s = %s" % (b, vb))
+
+    def i_STORE_FAST_LOAD_FAST(self, ins):
+        a, b = ins.argval
+        v = self.pop(None)
+        if v is not None:
+            self.emit("%s = %s" % (a, v))
+        self.push(b)
+
+    def i_STORE_FAST_LOAD_CONST(self, ins):
+        f, c = ins.argval
+        v = self.pop(None)
+        if v is not None:
+            self.emit("%s = %s" % (f, v))
+        self.push(repr(c))
+
+    def i_BINARY_SLICE(self, ins):
+        """3.13 新增：a[b:c]，三个操作数已在栈上。"""
+        c = self.pop()
+        b = self.pop()
+        a = self.pop()
+        self.push("%s[%s:%s]" % (a, b, c))
+
+    def i_STORE_SLICE(self, ins):
+        c = self.pop()
+        b = self.pop()
+        a = self.pop()
+        v = self.pop(None)
+        if v is not None:
+            self.emit("%s[%s:%s] = %s" % (a, b, c, v))
+
+    def i_MAKE_CELL(self, ins):
+        pass          # 闭包单元，语义上无输出
+
+    def i_COPY_FREE_VARS(self, ins):
+        pass
+
+    def i_MAKE_FUNCTION(self, ins):
+        """函数体内的嵌套 def / lambda。
+
+        3.13 栈序：先压 defaults（若有），再压 annotations/closure，
+        最后由本指令从 co_consts 隐含取 code 对象。这里只处理最常见的
+        「无默认值」情形：栈上已有 code 占位，STORE_* 时输出 def。
+        """
+        pass      # 由 build_src 的模块级/结构化逻辑处理
+
+    def i_SET_FUNCTION_ATTRIBUTE(self, ins):
+        pass
+
+    def i_RETURN_GENERATOR(self, ins):
+        """生成器函数标记，无实际语句。"""
+        pass
+
+    def i_MAKE_CELL(self, ins):
+        pass
+
+    def i_YIELD_VALUE(self, ins):
+        v = self.pop(None)
+        self.push("(yield %s)" % v if v else "yield")
+
+    def i_GET_YIELD_FROM_ITER(self, ins):
+        pass
+
+    def i_END_SEND(self, ins):
+        pass
+
+    def i_SEND(self, ins):
+        self.emit("# [异步] send/yield from")
 
     # ====================================================== 返回 / 异常
     def i_RETURN_VALUE(self, ins):
