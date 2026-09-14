@@ -38,6 +38,24 @@ jobs:
       - name: 安装 Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: 环境与权限自检
+        run: |
+          echo "=== 事件: $GITHUB_EVENT_NAME | 分支: $GITHUB_REF ==="
+          echo "=== 仓库: $GITHUB_REPOSITORY ==="
+          echo "=== buildx 版本 ==="
+          docker buildx version || true
+          echo "=== 目标镜像名 ==="
+          echo "${REGISTRY}/${IMAGE_NAME}:latest"
+          echo "=== 尝试 GHCR 登录（失败会立刻暴露权限问题）==="
+          echo "token 长度: ${#GITHUB_TOKEN}"
+          echo "--- 探测 token 是否有 write:packages ---"
+          curl -s -o /dev/null -w "GET /user -> HTTP %{http_code}\n" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/user || true
+          echo "--- 探测 GHCR 推送凭据 ---"
+          curl -s -o /dev/null -w "GET package list -> HTTP %{http_code}\n" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/user/packages?package_type=container" || true
+
       - name: 登录 GHCR
         uses: docker/login-action@v3
         with:
@@ -57,6 +75,7 @@ jobs:
             type=raw,value=latest
 
       - name: 构建并推送
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -71,3 +90,16 @@ jobs:
           cache-to: type=gha,mode=max
           # 输出完整构建日志，失败时便于定位
           provenance: false
+
+      # 失败时把关键报错写进 commit status，便于从外部（无需登录）诊断
+      - name: 记录失败原因
+        if: failure()
+        run: |
+          MSG=$(docker buildx ls 2>&1 | head -5 | tr '\n' ';' | cut -c1-120)
+          echo "构建失败。buildx 状态: $MSG"
+          curl -s -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "{\"state\":\"failure\",\"context\":\"docker-build-debug\",\"description\":\"$MSG\"}" \
+            -o /dev/null -w "上报诊断 HTTP %{http_code}\n" || true
