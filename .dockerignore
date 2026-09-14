@@ -1,0 +1,14 @@
+.git
+.gitignore
+.gitattributes
+
+# 构建上下文里不需要的东西（尤其是体积巨大的影库清单）
+记录数据存放目录【勿动】
+秒传文件导入或追加
+docker/data
+
+# 文档与编排文件不影响镜像内容
+docker-compose.yml
+docker/README.md
+README.md
+使用说明.md

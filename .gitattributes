@@ -1,0 +1,12 @@
+# 统一使用 LF 换行：Dockerfile / entrypoint 脚本在 CRLF 下会导致构建失败
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.exe binary
+*.dll binary
+*.pyc binary
+*.mp3 binary
+*.flac binary
+*.png binary
+*.jpg binary
+*.ico binary

@@ -1,0 +1,37 @@
+# 123云盘影库搜索工具 —— Docker Compose 部署
+#
+#   启动： docker compose up -d --build
+#   日志： docker compose logs -f
+#   停止： docker compose down
+#
+# 数据（影库 JSON、导出文件、登录凭据、日志）全部落在 ./data 目录，
+# 删容器不会丢；换机器把整个项目目录拷走即可。
+services:
+  pan123-library:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: 123-library:1.0.3
+    container_name: pan123-library
+    restart: unless-stopped
+
+    # 宿主机端口:容器端口。左侧可用环境变量覆盖，例如 LB_PORT=8080 docker compose up -d
+    ports:
+      - "${LB_PORT:-5890}:5890"
+
+    environment:
+      TZ: Asia/Shanghai
+      # 浏览器模式：跳过 pywebview 桌面窗口（容器内没有 GUI）
+      LB_BROWSER: "1"
+      # 数据目录（对应下面的数据卷挂载点）
+      LB_DATA_ROOT: /data
+
+    volumes:
+      # 影库数据/登录态持久化。首次启动会自动生成子目录结构。
+      - ./data:/data
+
+    # 秒传批量导入是 IO + 网络密集，给足文件句柄
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
