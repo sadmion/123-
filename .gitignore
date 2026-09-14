@@ -33,3 +33,6 @@ desktop.ini
 _rid.txt
 _logs.zip
 *.tar
+
+# 反编译中间产物（可变，不入库）
+tools/decompiled/_*.py
