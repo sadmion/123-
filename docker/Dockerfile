@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 #
 # 123云盘影库搜索工具 —— 容器镜像
 #
@@ -23,6 +22,8 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # 运行依赖：requests（123云盘接口）、segno（扫码登录二维码生成）
+# 国内网络较慢时可改用镜像源（把下面一行换成被注释的那行）：
+# RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple requests segno
 RUN pip install --no-cache-dir requests segno
 
 # ① 抽出 exe 内的字节码与静态资源（丢弃 Windows 专用 DLL/PYD）
