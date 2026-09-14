@@ -1,13 +1,21 @@
 name: 构建并发布容器镜像
 
-# 打标签（如 v1.0.3）时自动构建多架构镜像并推送到 GitHub 容器仓库（GHCR），
+# 打标签（如 v1.0.3）时自动构建镜像并推送到 GitHub 容器仓库（GHCR），
 # 这样任何服务器都能直接 docker pull，无需自行 build，也不需要 Windows 机器。
-# 也支持在 Actions 页面手动触发。
+# 也支持在 Actions 页面手动触发（Actions → 本工作流 → Run workflow）。
+#
+# 构建策略：默认同时出 amd64 + arm64（NAS / 树莓派 / 云服务器共用）。
+# 若 arm64 在 QEMU 模拟下构建超时，可只保留 amd64 —— 见下方 platforms 注释。
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: "目标架构（默认双架构；排查问题时填 linux/amd64）"
+        required: false
+        default: "linux/amd64,linux/arm64"
 
 env:
   REGISTRY: ghcr.io
@@ -54,9 +62,12 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
-          # 同时出 amd64 与 arm64，NAS / 树莓派 / 云服务器都能用
-          platforms: linux/amd64,linux/arm64
+          # 手动触发时可用参数覆盖，便于只构建单架构排查问题
+          platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 构建缓存复用，二次构建显著提速
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # 输出完整构建日志，失败时便于定位
+          provenance: false
