@@ -2,7 +2,7 @@ name: 构建并发布容器镜像
 
 # 打标签（如 v1.0.3）时自动构建镜像并推送到 GitHub 容器仓库（GHCR），
 # 任何服务器都能直接 docker pull，无需自行 build，也不需要 Windows 机器。
-# 也支持在 Actions 页面手动触发。
+# 也支持在 Actions 页面手动触发（Actions → 本工作流 → Run workflow）。
 on:
   push:
     tags:
@@ -18,7 +18,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      statuses: write        # 失败时上报诊断信息需要
 
     steps:
       - name: 检出仓库
@@ -37,45 +36,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 计算镜像名与标签
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
-          tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-
-      # 用最朴素的 buildx 原生命令构建，避免 action 封装层掩盖真实报错。
-      # 双架构：amd64（云服务器 / x86 NAS）+ arm64（树莓派 / ARM NAS）。
+      # 直接用 buildx 构建，标签在这里显式拼装，避免多行 metadata 输出
+      # 在 shell 里被拆分导致脚本解析异常的坑。
       - name: 构建并推送
-        id: build
+        shell: bash
         run: |
-          set -x
-          PRIMARY=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          # metadata 会输出多行标签，逐行转成 --tag 参数
-          TAGS=""
-          while IFS= read -r t; do
-            [ -n "$t" ] && TAGS="$TAGS --tag $t"
-          done <<< "${{ steps.meta.outputs.tags }}"
+          set -euxo pipefail
+          IMAGE="${REGISTRY}/${GITHUB_REPOSITORY}"
+
+          # 版本标签：优先取 git tag（v1.0.3 → 1.0.3），分支构建则用 short sha
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="sha-${GITHUB_SHA::7}"
+          fi
 
           docker buildx build \
             --file docker/Dockerfile \
             --platform linux/amd64,linux/arm64 \
-            $TAGS \
+            --tag "${IMAGE}:${VERSION}" \
+            --tag "${IMAGE}:latest" \
             --push \
             .
 
-      # 失败时把诊断写入 commit status，便于从外部（无需登录）读取
-      - name: 上报失败诊断
-        if: failure()
+      - name: 校验镜像已发布
+        shell: bash
         run: |
-          MSG="构建失败，请查看 Actions 日志（run $GITHUB_RUN_ID）"
-          curl -s -X POST \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "{\"state\":\"failure\",\"context\":\"docker-build\",\"description\":\"$MSG\",\"target_url\":\"https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}" \
-            -o /dev/null -w "上报诊断 HTTP %{http_code}\n" || true
+          set -eu
+          echo "镜像已推送，标签如下："
+          echo "  ${REGISTRY}/${GITHUB_REPOSITORY}:latest"
