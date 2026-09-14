@@ -27,7 +27,7 @@ docker run -d --name pan123-library \
   -e TZ=Asia/Shanghai \
   -e LB_BROWSER=1 \
   --restart unless-stopped \
-  ghcr.io/sadmion/123-:latest
+  ghcr.io/sadmion/pan123-library:latest
 ```
 
 然后浏览器访问 `http://<机器IP>:5890/`。用 Compose 编排（含端口、数据卷、健康检查）见 [`docker-compose.yml`](docker-compose.yml)，完整部署文档、常见问题与安全提示见 [`docker/README.md`](docker/README.md)。

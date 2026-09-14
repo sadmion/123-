@@ -11,6 +11,11 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  # ⚠️ 镜像名必须单独指定，不能沿用仓库名（${{ github.repository }}）。
+  # 本仓库名为 "123-"，结尾是连字符，而 Docker 要求镜像路径的每个组件
+  # 以字母或数字结尾（[a-z0-9]+([._-][a-z0-9]+)*），"123-" 属非法名称，
+  # 会导致 GHCR 无法创建该包、客户端 pull 时直接解析失败。
+  IMAGE_NAME: pan123-library
 
 jobs:
   build-and-push:
@@ -22,6 +27,18 @@ jobs:
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
+
+      - name: 校验镜像名合法性
+        shell: bash
+        run: |
+          IMAGE="${REGISTRY}/${GITHUB_REPOSITORY_OWNER}/${IMAGE_NAME}"
+          echo "镜像地址: ${IMAGE}"
+          # 逐组件校验：每个路径组件必须满足 [a-z0-9]+([._-][a-z0-9]+)*
+          if ! printf '%s' "${IMAGE}" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$'; then
+            echo "::error::镜像名不合法: ${IMAGE}"
+            exit 1
+          fi
+          echo "镜像名合法"
 
       # 多架构构建需要 QEMU 注册 binfmt，官方 action 已封装该步骤
       - name: 安装 QEMU
@@ -37,9 +54,6 @@ jobs:
         run: |
           echo "=== buildx 实例 ==="
           docker buildx ls
-          echo "=== binfmt 注册情况 ==="
-          ls /proc/sys/fs/binfmt_misc/ 2>/dev/null | tr '\n' ' ' || echo "(无法读取)"
-          echo
           echo "=== 测试 arm64 容器能否运行（QEMU 是否生效）==="
           if docker run --rm --platform linux/arm64 alpine:3.20 uname -m; then
             echo "arm64 QEMU 可用"
@@ -59,7 +73,7 @@ jobs:
       - name: 构建并推送
         shell: bash
         run: |
-          IMAGE="${REGISTRY}/${GITHUB_REPOSITORY}"
+          IMAGE="${REGISTRY}/${GITHUB_REPOSITORY_OWNER}/${IMAGE_NAME}"
 
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"

@@ -1,11 +1,14 @@
 # ============================================================
 # 123云盘影库搜索工具 —— Docker Compose 部署
 #
-#   方式一（推荐）：直接用现成镜像，无需构建
-#       docker compose up -d
+# ★ 方式一（最稳，推荐）：在 NAS 上直接构建
+#     1) 把整个项目目录拷到 NAS（要有 exe 和 docker/ 子目录）
+#     2) docker compose up -d --build
+#     3) 浏览器访问 http://<NAS的IP>:5890/
+#   不依赖 GHCR / GitHub 网络，只要 NAS 能联网装 pip 依赖即可。
 #
-#   方式二：从本仓库源码构建镜像
-#       docker compose up -d --build
+# ★ 方式二：拉取现成镜像（需 GHCR 包已设为 Public，见 docker/README.md）
+#     docker compose pull && docker compose up -d
 #
 #   查看日志： docker compose logs -f
 #   停止：     docker compose down          （data/ 数据不受影响）
@@ -15,12 +18,11 @@
 # ============================================================
 services:
   pan123-library:
-    # 默认使用 GitHub 容器仓库里的现成镜像（由 .github/workflows 自动构建）。
-    # 想改为本地构建：把 image 改成任意名字，并给下面的 up 命令加 --build。
-    image: ghcr.io/sadmion/123-:latest
-
-    # 如需从源码构建，取消下面 build 段的注释即可（与 image 可共存：
-    # 有 --build 时构建，否则直接用 image）
+    # 默认：本地构建，镜像名仅作本地标签用途。
+    # 想改用远程镜像：把下面一行换成
+    #   image: ghcr.io/sadmion/pan123-library:latest
+    # 并删除 build 段。
+    image: pan123-library:1.0.3
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -49,10 +51,3 @@ services:
       nofile:
         soft: 65536
         hard: 65536
-
-    # 容器健康检查（镜像内已定义，此处可覆盖调优）
-    # healthcheck:
-    #   test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5890/api/login/status',timeout=3).status==200 else 1)"]
-    #   interval: 30s
-    #   timeout: 5s
-    #   retries: 3

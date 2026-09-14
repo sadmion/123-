@@ -6,32 +6,35 @@
 
 ## 一、快速开始
 
-### 方式一：直接拉镜像（推荐，无需构建）
+### 方式一：在目标机器上直接构建（最稳，推荐）
 
-镜像已发布在 GitHub 容器仓库，任何 x86_64 / ARM 服务器都能直接拉取，**不需要本机有构建环境、也不需要 Windows 机器**：
+不依赖任何远程镜像仓库，只要目标机器能联网装 pip 依赖：
 
 ```bash
-# 1. 进入项目目录（含 docker-compose.yml 的那层）
+# 1. 把整个项目目录拷到 NAS / 服务器（必须含 exe 与 docker/ 子目录）
+#    例如用 SSH、SMB、群晖 File Station 等传过去
+
+# 2. 进入项目目录（含 docker-compose.yml 的那层）
 cd 123搜索工具
 
-# 2. 拉取并启动（默认使用 ghcr.io/sadmion/123-:latest）
-docker compose up -d
+# 3. 构建并启动
+docker compose up -d --build
 
-# 3. 浏览器访问
-http://<部署机器的IP>:5890/
+# 4. 浏览器访问
+http://<机器的IP>:5890/
 ```
 
-前提：项目目录里要有 `docker-compose.yml`。若只想拷这一个文件到别处，记得同时保证 `./data` 目录可用（会自动创建）。
+首次构建约 2~5 分钟（拉基础镜像 + 装依赖 + 从 exe 抽包）。**这是最不容易出问题的方式**，推荐优先使用。
 
-### 方式二：从源码本地构建
+### 方式二：拉取现成镜像（需先完成 GHCR 公开设置）
 
-改了代码或想自己编译时：
+若不想在目标机器上构建，可直接拉取已发布的镜像：
 
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
-首次构建约 1~3 分钟（装依赖 + 从 exe 抽包）。构建用的 exe 就在仓库里，克隆后即可直接 build。
+（或把 compose 里的 `image` 换成 `ghcr.io/sadmion/pan123-library:latest` 并删掉 `build` 段。）
 
 ### 验证是否启动成功
 
@@ -48,13 +51,17 @@ docker compose logs -f     # 看到下面这行即正常
 
 | 项目 | 内容 |
 |---|---|
-| 镜像地址 | `ghcr.io/sadmion/123-:latest`（另含 `:v1.0.3` 等版本标签） |
+| 镜像地址 | `ghcr.io/sadmion/pan123-library:latest`（另含 `:1.0.3` 等版本标签） |
 | 支持架构 | `linux/amd64`、`linux/arm64`（NAS、树莓派、ARM 云主机均可） |
 | 构建方式 | 打 `v*` 标签时由 GitHub Actions 自动构建推送（见 `.github/workflows/docker-publish.yml`） |
 | 手动更新 | `docker compose pull && docker compose up -d` |
 
+> **注意镜像名与仓库名不同**：仓库叫 `123-`，但镜像叫 `pan123-library`。
+> 因为 Docker 要求镜像路径的每个组件以字母或数字结尾，而 `123-` 以连字符结尾，
+> 属于**非法镜像名**（`docker pull ghcr.io/sadmion/123-` 会报 `invalid reference format`）。
+
 > **GHCR 镜像默认是私有的**，首次在其他服务器拉取会报 `unauthorized`。两种处理方式：
-> - **公开**（推荐，最省事）：GitHub 仓库页 → 右侧 `Packages` → 点开该镜像 → `Package settings` → 底部 `Change visibility` → 改为 `Public`。
+> - **公开**（推荐，最省事）：GitHub 仓库页 → 右侧 `Packages` → 点开 `pan123-library` → `Package settings` → 底部 `Change visibility` → 改为 `Public`。
 > - **保持私有**：登录后再拉
 >   ```bash
 >   echo <你的GitHub个人访问令牌> | docker login ghcr.io -u sadmion --password-stdin
@@ -68,7 +75,7 @@ docker compose logs -f     # 看到下面这行即正常
 ```yaml
 services:
   pan123-library:
-    image: ghcr.io/sadmion/123-:latest
+    image: ghcr.io/sadmion/pan123-library:latest
     container_name: pan123-library
     restart: unless-stopped
     ports:
@@ -140,7 +147,9 @@ exe 是 PyInstaller 单文件产物，里面装的是 **CPython 3.13 字节码**
 | 现象 | 原因与处理 |
 |---|---|
 | `docker: command not found` | 先装 Docker；NAS 一般在套件中心装 Docker / Container Manager |
+| **`invalid reference format`** | **镜像名不合法**。别用仓库名当镜像名——本仓库名 `123-` 以连字符结尾，Docker 不允许（路径组件必须以字母/数字结尾）。正确镜像是 `ghcr.io/sadmion/pan123-library:latest` |
 | 拉镜像报 `unauthorized` / `denied` | GHCR 镜像默认私有，按第二节改成 Public，或先 `docker login ghcr.io` |
+| `manifest unknown` / `not found` | 镜像还没成功构建出来。去仓库 Actions 页看构建是否变绿；或改用「方式一：本地构建」 |
 | 启动后访问不了 | ①端口被占用 `netstat -tlnp \| grep 5890`；②云服务器需在安全组放行；③改了 `LB_PORT` 后要用新端口访问 |
 | 日志报 `未选择数据目录, 退出` | 数据目录不存在：确认 `./data` 可创建，或 `LB_DATA_ROOT` 指向的路径已存在 |
 | 容器不断重启 | 看 `docker compose logs` 报错；多为端口冲突或 data 目录无写权限 |
