@@ -1,21 +1,35 @@
+# ============================================================
 # 123云盘影库搜索工具 —— Docker Compose 部署
 #
-#   启动： docker compose up -d --build
-#   日志： docker compose logs -f
-#   停止： docker compose down
+#   方式一（推荐）：直接用现成镜像，无需构建
+#       docker compose up -d
 #
-# 数据（影库 JSON、导出文件、登录凭据、日志）全部落在 ./data 目录，
+#   方式二：从本仓库源码构建镜像
+#       docker compose up -d --build
+#
+#   查看日志： docker compose logs -f
+#   停止：     docker compose down          （data/ 数据不受影响）
+#
+# 数据（影库 JSON、导出文件、登录凭据、日志）全部落在项目目录下的 ./data，
 # 删容器不会丢；换机器把整个项目目录拷走即可。
+# ============================================================
 services:
   pan123-library:
+    # 默认使用 GitHub 容器仓库里的现成镜像（由 .github/workflows 自动构建）。
+    # 想改为本地构建：把 image 改成任意名字，并给下面的 up 命令加 --build。
+    image: ghcr.io/sadmion/123-:latest
+
+    # 如需从源码构建，取消下面 build 段的注释即可（与 image 可共存：
+    # 有 --build 时构建，否则直接用 image）
     build:
       context: .
       dockerfile: docker/Dockerfile
-    image: 123-library:1.0.3
+
     container_name: pan123-library
     restart: unless-stopped
 
-    # 宿主机端口:容器端口。左侧可用环境变量覆盖，例如 LB_PORT=8080 docker compose up -d
+    # 宿主机端口:容器端口。左边可用环境变量覆盖，例如：
+    #   LB_PORT=8080 docker compose up -d
     ports:
       - "${LB_PORT:-5890}:5890"
 
@@ -27,7 +41,7 @@ services:
       LB_DATA_ROOT: /data
 
     volumes:
-      # 影库数据/登录态持久化。首次启动会自动生成子目录结构。
+      # 影库数据 / 登录态持久化。首次启动会自动生成子目录结构。
       - ./data:/data
 
     # 秒传批量导入是 IO + 网络密集，给足文件句柄
@@ -35,3 +49,10 @@ services:
       nofile:
         soft: 65536
         hard: 65536
+
+    # 容器健康检查（镜像内已定义，此处可覆盖调优）
+    # healthcheck:
+    #   test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5890/api/login/status',timeout=3).status==200 else 1)"]
+    #   interval: 30s
+    #   timeout: 5s
+    #   retries: 3
