@@ -1,7 +1,7 @@
 name: CI 环境自检
 
-# 独立的最小工作流：只验证 Actions 环境本身能否正常执行 shell 与 docker，
-# 不涉及镜像构建。用于排查主构建工作流异常时是环境问题还是脚本问题。
+# 独立的最小工作流：验证 Actions 环境能否执行 shell / docker / 多架构构建。
+# 用于排查主构建工作流异常时，是环境问题还是脚本问题。
 on:
   workflow_dispatch:
   push:
@@ -17,7 +17,6 @@ jobs:
       - name: Shell 可用性
         run: |
           echo "bash 版本: $BASH_VERSION"
-          echo "shell: $SHELL"
           echo "事件: $GITHUB_EVENT_NAME"
           echo "ref: $GITHUB_REF | type: $GITHUB_REF_TYPE"
 
@@ -27,14 +26,23 @@ jobs:
           docker buildx version
           docker buildx ls
 
-      - name: 简单构建测试（验证 buildx 能跑通）
+      - name: 注册 binfmt（多架构构建的前提）
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install all
+          echo "--- 已注册的 binfmt 条目 ---"
+          ls /proc/sys/fs/binfmt_misc/ || true
+
+      - name: 安装 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 单架构构建测试
         run: |
           mkdir -p /tmp/dtest
           printf 'FROM alpine:3.20\nRUN echo hello > /hello.txt\n' > /tmp/dtest/Dockerfile
           docker buildx build --load --tag citest:local /tmp/dtest
-          echo "构建成功"
+          echo "单架构构建成功"
 
-      - name: 多架构构建支持测试
+      - name: 多架构构建测试
         run: |
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
