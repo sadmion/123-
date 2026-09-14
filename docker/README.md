@@ -10,21 +10,31 @@
 
 不依赖任何远程镜像仓库，只要目标机器能联网装 pip 依赖：
 
+**1) 把项目取到服务器上**（任选一种）
+
 ```bash
-# 1. 把整个项目目录拷到 NAS / 服务器（必须含 exe 与 docker/ 子目录）
-#    例如用 SSH、SMB、群晖 File Station 等传过去
+# A. 直接克隆仓库（推荐，最省事；仓库已含 exe，约 87MB）
+git clone https://github.com/sadmion/123-.git
+cd 123-
 
-# 2. 进入项目目录（含 docker-compose.yml 的那层）
-cd 123搜索工具
+# B. 或者用 SMB / File Station / scp 把整个项目目录拷过去
+```
 
-# 3. 构建并启动
+**2) 构建并启动**
+
+```bash
 docker compose up -d --build
 
-# 4. 浏览器访问
+# 3) 浏览器访问
 http://<机器的IP>:5890/
 ```
 
 首次构建约 2~5 分钟（拉基础镜像 + 装依赖 + 从 exe 抽包）。**这是最不容易出问题的方式**，推荐优先使用。
+
+> 构建前可先自检，无需 Docker 也能跑，能提前发现文件缺失等问题：
+> ```bash
+> python3 docker/selfcheck.py
+> ```
 
 ### 方式二：拉取现成镜像（需先完成 GHCR 公开设置）
 
@@ -35,6 +45,8 @@ docker compose pull && docker compose up -d
 ```
 
 （或把 compose 里的 `image` 换成 `ghcr.io/sadmion/pan123-library:latest` 并删掉 `build` 段。）
+
+⚠️ **不做公开设置会报 `unauthorized`**，处理见下面第二节的说明。
 
 ### 验证是否启动成功
 
