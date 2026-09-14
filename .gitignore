@@ -7,7 +7,19 @@ data_config.json.bak
 *.log
 
 # ===== Docker 数据卷（含登录态，严禁上传）=====
-data/
+# 注意：只忽略目录内容，保留目录结构本身（否则别人克隆后目录不存在，
+# 会导致 exe 启动时报「未选择数据目录, 退出」）
+data/*
+!data/.gitkeep
+!data/秒传文件导入或追加/
+data/秒传文件导入或追加/*
+!data/秒传文件导入或追加/.gitkeep
+!data/秒传文件导出/
+data/秒传文件导出/*
+!data/秒传文件导出/.gitkeep
+!data/记录数据存放目录【勿动】/
+data/记录数据存放目录【勿动】/*
+!data/记录数据存放目录【勿动】/.gitkeep
 docker/data/
 
 # ===== 构建中间产物 =====
