@@ -52,3 +52,7 @@ tools/decompiled/_*.py
 # 影库瘦身输出（大文件，不入库）
 瘦身输出/
 拆分输出/
+
+# 断点文件（含分享链接信息，不入库）
+_checkpoints/
+*.bak
