@@ -1,15 +1,13 @@
 #
-# 123云盘影库搜索工具 —— 容器镜像
+# 123云盘影库搜索工具 —— 容器镜像（源码版）
 #
-# 设计思路：不重写业务代码，而是把 Windows 版 exe（PyInstaller 产物）里的
-# Python 字节码与前端静态资源在**构建阶段**抽出来，再交给容器里的官方
-# CPython 3.13 直接执行。这样容器版与桌面版出自同一份构建产物，功能与
-# 行为天然一致，后续换新 exe 重新 build 即可，无需维护两套代码。
+# 设计思路：直接构建 src/ 下的源码，不再从桌面版 exe 抽字节码。
+# 这样改代码 → 推仓库 → CI 重建镜像即可，无需重新打包 exe。
 #
 FROM python:3.13-slim
 
 LABEL org.opencontainers.image.title="123云盘影库搜索工具" \
-      org.opencontainers.image.description="123云盘秒传影库管理工具 V1.0.3（Docker 版）" \
+      org.opencontainers.image.description="123云盘秒传影库管理工具 V1.0.3（Docker 源码版）" \
       org.opencontainers.image.source="https://github.com/sadmion/123-"
 
 ENV PYTHONUNBUFFERED=1 \
@@ -26,15 +24,26 @@ WORKDIR /app
 # RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple requests segno
 RUN pip install --no-cache-dir requests segno
 
-# ① 抽出 exe 内的字节码与静态资源（丢弃 Windows 专用 DLL/PYD）
-COPY ["123云盘影库搜索工具.exe", "/tmp/app.exe"]
-COPY docker/extract_pyinstaller.py /tmp/extract_pyinstaller.py
-RUN python /tmp/extract_pyinstaller.py /tmp/app.exe --linux -o /app \
-    && rm -f /tmp/app.exe /tmp/extract_pyinstaller.py \
-    && echo "--- 镜像内应用文件 ---" && ls -la /app
+# ① 源码 + 前端静态资源（同目录，server.py 按 __file__ 定位）
+COPY src/ /app/src/
 
 # ② 容器启动器：改监听地址为 0.0.0.0、屏蔽桌面壳、准备数据目录
 COPY docker/entry.py /app/entry.py
+
+# 构建期自检：确保 4 个模块与前端资源都在，且源码可编译
+RUN python - <<'PY'
+import compileall, os, sys
+need = ['server.py', 'pan123_api.py', 'tasks.py', 'library_store.py',
+        'index.html', 'style.css', 'app.js']
+miss = [n for n in need if not os.path.exists('/app/src/' + n)]
+if miss:
+    sys.exit('缺少文件: %s' % ', '.join(miss))
+if not compileall.compile_dir('/app/src', quiet=1):
+    sys.exit('源码编译失败')
+print('--- 镜像内应用文件 ---')
+for n in sorted(need):
+    print('  %-18s %8d B' % (n, os.path.getsize('/app/src/' + n)))
+PY
 
 VOLUME ["/data"]
 EXPOSE 5890

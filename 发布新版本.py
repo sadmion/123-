@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""版本发布工具 —— 换新 exe 后一键走完「自检 → 提交 → 打 tag → 触发镜像构建」
+"""版本发布工具 —— 改完源码后一键走完「自检 → 提交 → 打 tag → 触发镜像构建」
 
 ## 为什么需要它
 
 Docker 部署采用「拉取 GHCR 镜像」方式，所以**版本更新的关键是让 CI 重建镜像**。
-每次拿到新 exe 后需要：替换文件 → 自检 → 提交 → 打 tag 推送 → 等 CI 完成。
+每次改完 src/ 下的源码后需要：改代码 → 自检 → 提交 → 打 tag 推送 → 等 CI 完成。
 本脚本把这一串串起来，并做必要的前置校验。
 
 ## 用法
 
-    # 1) 把新 exe 覆盖到项目根目录（文件名保持一致），然后：
+    # 1) 改好 src/ 下的源码（或替换前端资源），然后：
 
     # 查看当前状态，预演一遍（不提交）
     python 发布新版本.py --version 1.0.4 --note "修复xx" --dry-run
@@ -23,7 +23,7 @@ Docker 部署采用「拉取 GHCR 镜像」方式，所以**版本更新的关�
 
 ## 它会做什么
 
-1. 校验仓库状态（exe 是否更新、是否在 git 仓库里）
+1. 校验仓库状态（源码是否更新、是否在 git 仓库里）
 2. 跑 docker/selfcheck.py（13 项构建自检，不需要 Docker）
 3. git add/commit（规范化提交信息）
 4. 打 tag 并推送（触发 GitHub Actions 重建镜像）
@@ -41,7 +41,7 @@ import subprocess
 import sys
 import time
 
-EXE = "123云盘影库搜索工具.exe"
+SRC = "src"
 
 
 def run(cmd, check=True, capture=True):
@@ -76,7 +76,7 @@ def err(msg):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="换新 exe 后一键发布新版本（触发镜像重建）",
+        description="改完源码后一键发布新版本（触发镜像重建）",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", help="版本号，如 1.0.4（会自动加 v 前缀）")
     ap.add_argument("--note", default="", help="更新说明")
@@ -102,19 +102,21 @@ def main():
     ok("git 仓库正常")
     ok("当前分支: %s" % out("git rev-parse --abbrev-ref HEAD"))
 
-    if not os.path.isfile(EXE):
-        err("找不到 %s" % EXE)
+    if not os.path.isdir(SRC):
+        err("找不到源码目录 %s" % SRC)
         return 2
-    size_mb = os.path.getsize(EXE) / 1048576
-    ok("%s (%.1f MB)" % (EXE, size_mb))
+    mods = [f for f in sorted(os.listdir(SRC)) if f.endswith(".py")]
+    ok("源码目录 %s（%d 个模块: %s）" % (SRC, len(mods), ", ".join(mods)))
+    total = sum(os.path.getsize(os.path.join(SRC, f)) for f in os.listdir(SRC))
+    ok("源码与资源合计 %.1f KB" % (total / 1024))
 
-    # exe 是否被改动
-    st = out("git status --porcelain -- \"%s\"" % EXE)
-    exe_changed = bool(st)
-    if exe_changed:
-        ok("检测到 exe 有改动（将随本次提交一起推送）")
+    # 源码是否被改动
+    st = out("git status --porcelain -- \"%s\"" % SRC)
+    src_changed = bool(st)
+    if src_changed:
+        ok("检测到源码有改动（将随本次提交一起推送）")
     else:
-        warn("exe 没有变化 —— 若你刚替换过文件，请确认文件名与路径正确")
+        warn("源码没有变化 —— 若你刚改过代码，请确认已保存且路径正确")
 
     remote = out("git remote get-url origin")
     ok("远程仓库: %s" % remote)

@@ -18,15 +18,24 @@ docker/data
 **/*.123fastlink.json
 秒传文件导出
 
-# ===== 桌面版 exe 只保留 Dockerfile 需要的那一个 =====
-# 容器构建只用「123云盘影库搜索工具.exe」，
-# 浏览器版是桌面壳，不进镜像，排除掉可省 29MB 上下文
-123云盘影库搜索工具浏览器版.exe
+# ===== 桌面版 exe：源码版镜像不再需要，全部排除 =====
+# 历史上 Dockerfile 要从 exe 抽字节码，故需保留一个；
+# 现在改为直接构建 src/ 源码，exe 一律不进上下文（省约 58MB）
 *.exe
-!123云盘影库搜索工具.exe
+
+# ===== 构建工具与中间产物（镜像里用不到）=====
+# 反编译还原用的字节码与工作稿，只在本机使用
+tools/bytecode
+tools/decompiled
+_work
+.selfcheck
 
 # ===== 文档与编排文件不影响镜像内容 =====
 docker-compose.yml
 docker/README.md
 README.md
 使用说明.md
+打不开怎么办.md
+追加影库崩溃-诊断报告.md
+提取失败-skipped-修复.md
+版本更新说明.md
