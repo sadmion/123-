@@ -84,9 +84,10 @@ tools/
   verify_src.py     源码还原校验器（比对源码与原始字节码）
   mem_test.py       影库内存测试（诊断「追加影库崩溃」）
   split_library.py  影库拆分（降低加载峰值）
-run.py              本地启动器
+run.py              本地启动器（python run.py 或双击）
 启动.bat            Windows 双击启动
 发布新版本.py        一键发布（自检 → 提交 → 打 tag → 推送）
+CHANGELOG.md        版本记录
 ```
 
 ## 发布新版本
@@ -118,7 +119,7 @@ docker compose pull && docker compose up -d
 - **背景音乐**：内置曲目，可自定义 `bgm.mp3`
 - **右侧面板可拖动**：拖动右面板左边缘的分隔条可调宽度，双击复位
 
-详细使用说明见 [`使用说明.md`](使用说明.md)。
+详细使用说明见 [`使用说明.md`](使用说明.md)，版本变更见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 安全提醒
 
