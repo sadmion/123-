@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>123云盘影库搜索工具</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=1.0.6">
 </head>
 <body>
 
@@ -170,8 +170,11 @@
     </div>
   </main>
 
+  <!-- 可拖动分隔条：调整右侧面板宽度 -->
+  <div class="splitter" id="rightSplitter" title="拖动调整宽度（双击复位）"></div>
+
   <!-- ══════ 右面板 ══════ -->
-  <aside class="right-panel">
+  <aside class="right-panel" id="rightPanel">
     <div class="panel-card">
       <h3><span class="ico">📊</span>存储分析</h3>
       <div class="donut-wrap"><canvas id="donut" width="190" height="190"></canvas></div>
@@ -249,6 +252,7 @@
 <input type="file" id="jsonFileInput" accept=".json" style="display:none">
 <audio id="bgm" src="bgm.wav" loop preload="auto"></audio>
 
-<script src="app.js"></script>
+<!-- 改完 app.js / style.css 后把 v= 换成新值（时间戳即可），强制浏览器拉新版 -->
+<script src="app.js?v=1.0.6"></script>
 </body>
 </html>

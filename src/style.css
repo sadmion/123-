@@ -75,6 +75,27 @@ input, select { font-family: inherit; }
 }
 @media (max-width: 1400px) { .right-panel { display: none; } }
 
+/* ── 可拖动分隔条 ── */
+.splitter {
+  width: 6px; flex-shrink: 0; cursor: col-resize; position: relative;
+  background: transparent; transition: background .15s;
+  display: none;                       /* 窄屏（右面板隐藏）时不显示 */
+}
+.splitter.avail { display: block; }
+.splitter::before {                    /* 居中的细线，视觉上提示可拖 */
+  content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px;
+  background: var(--rule); transition: background .15s;
+}
+.splitter:hover::before,
+.splitter.dragging::before { background: var(--accent); }
+.splitter:hover { background: var(--accent-soft); }
+.splitter.dragging { background: var(--accent-soft); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing * { cursor: col-resize !important; }
+
+/* 分隔条的显隐由 JS 根据右面板实际是否可见来控制（.avail 类），
+   不再用 max-width 媒体查询——否则右面板显示着、分隔条却消失了。 */
+
 /* ── 通用卡片/按钮 ── */
 .panel-card {
   background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius);
@@ -159,18 +180,33 @@ input, select { font-family: inherit; }
 #searchInput { flex: 1; min-width: 200px; }
 
 /* ── 分类栏 ── */
-.cat-zone { padding: 4px 16px 0; }
+.cat-zone { padding: 4px 16px 0; flex-shrink: 0; }
 .cat-head {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;
 }
 .cat-wrap {
-  position: relative; overflow: hidden; max-height: 236px; transition: max-height .25s;
+  position: relative; max-height: 236px; transition: max-height .25s;
+  /* 折叠时内容超出可上下滚动（原来是 overflow:hidden，超出的内容被直接切掉） */
+  overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain;              /* 滚到底不带动外层页面 */
+  scrollbar-width: thin; scrollbar-color: var(--rule) transparent;
 }
-.cat-wrap.expanded { max-height: 3000px; }
-.cat-wrap.folded::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 46px;
+/* 展开：高度上限放宽，但仍保留滚动 —— 分类特别多时依然能滑 */
+.cat-wrap.expanded { max-height: 70vh; }
+/* 遮罩只在「确实需要折叠」时出现：加了 folded 且没展开。
+   右边留出 8px 不盖住滚动条 */
+.cat-wrap.folded:not(.expanded)::after {
+  content: ""; position: absolute; left: 0; right: 8px; bottom: 0; height: 46px;
   background: linear-gradient(transparent, var(--bg)); pointer-events: none;
 }
+/* 细滚动条（WebKit） */
+.cat-wrap::-webkit-scrollbar { width: 8px; }
+.cat-wrap::-webkit-scrollbar-track { background: transparent; }
+.cat-wrap::-webkit-scrollbar-thumb {
+  background: var(--rule); border-radius: 4px; border: 2px solid transparent;
+  background-clip: content-box;
+}
+.cat-wrap::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: content-box; }
 .cat-lines { display: flex; flex-wrap: wrap; gap: 7px; padding-bottom: 4px; }
 .lib-group {
   width: 100%; display: flex; align-items: center; gap: 7px; margin-top: 5px;

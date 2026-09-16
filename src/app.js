@@ -172,13 +172,49 @@ function updateFold() {
   const wrap = $("#catWrap"), btn = $("#btnExpandMore");
   if (!wrap) return;
   const lines = $("#catLines").getBoundingClientRect().height;
-  if (lines > 200) { wrap.classList.add("folded"); btn.classList.add("show"); }
-  else { btn.classList.remove("show"); wrap.classList.remove("folded"); }
+  if (lines > 200) {
+    // 内容够长才显示按钮；若用户已手动展开，保持展开
+    btn.classList.add("show");
+    if (wrap.classList.contains("expanded")) {
+      wrap.classList.remove("folded");
+    } else {
+      wrap.classList.add("folded");
+    }
+  } else {
+    // 内容不长，按钮藏起来，同时复位折叠状态
+    btn.classList.remove("show");
+    wrap.classList.remove("folded");
+    wrap.classList.remove("expanded");
+  }
+  syncExpandBtn();
 }
+
+// 按钮文字始终跟随实际状态
+function syncExpandBtn() {
+  const wrap = $("#catWrap"), btn = $("#btnExpandMore");
+  if (!wrap || !btn) return;
+  const isOpen = wrap.classList.contains("expanded");
+  btn.textContent = isOpen ? "收起 ▴" : "展开更多 ▾";
+}
+
 $("#btnExpandMore").onclick = () => {
   const wrap = $("#catWrap");
-  wrap.classList.toggle("expanded");
-  $("#btnExpandMore").textContent = wrap.classList.contains("expanded") ? "收起 ▴" : "展开更多 ▾";
+  if (!wrap) return;
+  const isOpen = wrap.classList.contains("expanded");
+  if (isOpen) {
+    // 收起：去掉 expanded，加回 folded（恢复底部渐变遮罩）
+    wrap.classList.remove("expanded");
+    wrap.classList.add("folded");
+  } else {
+    // 展开：去掉 folded（移除遮罩），加上 expanded
+    wrap.classList.remove("folded");
+    wrap.classList.add("expanded");
+  }
+  syncExpandBtn();
+  // 展开状态变化后，滚动让它完整可见
+  try {
+    $("#catWrap").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  } catch (e) { /* 老浏览器忽略 */ }
 };
 $("#btnSubcat").onclick = () => {
   const zone = $("#subcatZone");
@@ -904,3 +940,82 @@ window.addEventListener("unhandledrejection", e => {
   } catch (e) {}
 })();
 
+
+/* ══════ 右侧面板宽度可拖动 ══════ */
+(function initSplitter() {
+  const sp = $("#rightSplitter"), rp = $("#rightPanel");
+  if (!sp || !rp) return;
+
+  const MIN_W = 240, MAX_W = 720, DEFAULT_W = 330;
+  const KEY = "rightPanelWidth";
+
+  function applyWidth(w) {
+    w = Math.max(MIN_W, Math.min(MAX_W, w));
+    rp.style.width = w + "px";
+    return w;
+  }
+  function avail() {
+    // 右面板在窄屏会被 CSS 隐藏，这时不显示分隔条
+    const shown = getComputedStyle(rp).display !== "none";
+    sp.classList.toggle("avail", shown);
+    return shown;
+  }
+
+  // 恢复上次宽度
+  const saved = parseInt(localStorage.getItem(KEY) || "", 10);
+  if (!isNaN(saved)) applyWidth(saved);
+  avail();
+  window.addEventListener("resize", avail);
+
+  let dragging = false, startX = 0, startW = 0;
+
+  function onMove(e) {
+    if (!dragging) return;
+    const x = (e.touches ? e.touches[0].clientX : e.clientX);
+    // 往左拖 → 面板变宽，所以取反
+    applyWidth(startW + (startX - x));
+    e.preventDefault();
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    sp.classList.remove("dragging");
+    document.body.classList.remove("resizing");
+    localStorage.setItem(KEY, parseInt(rp.style.width, 10) || DEFAULT_W);
+  }
+
+  sp.addEventListener("mousedown", (e) => {
+    dragging = true; startX = e.clientX;
+    startW = rp.getBoundingClientRect().width;
+    sp.classList.add("dragging");
+    document.body.classList.add("resizing");
+    e.preventDefault();
+  });
+  sp.addEventListener("touchstart", (e) => {
+    dragging = true; startX = e.touches[0].clientX;
+    startW = rp.getBoundingClientRect().width;
+    sp.classList.add("dragging");
+    document.body.classList.add("resizing");
+  }, { passive: true });
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("touchmove", onMove, { passive: false });
+  window.addEventListener("mouseup", onUp);
+  window.addEventListener("touchend", onUp);
+
+  // 双击分隔条 → 复位默认宽度
+  sp.addEventListener("dblclick", () => {
+    rp.style.width = DEFAULT_W + "px";
+    localStorage.removeItem(KEY);
+  });
+
+  // 键盘微调（无障碍）：聚焦后左右方向键
+  sp.tabIndex = 0;
+  sp.addEventListener("keydown", (e) => {
+    const cur = rp.getBoundingClientRect().width;
+    if (e.key === "ArrowLeft") { applyWidth(cur + 20); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { applyWidth(cur - 20); e.preventDefault(); }
+    else return;
+    localStorage.setItem(KEY, parseInt(rp.style.width, 10) || DEFAULT_W);
+  });
+})();

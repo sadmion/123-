@@ -25,7 +25,7 @@ APP_NAME = '123云盘影库搜索工具'
 
 # 版本号：优先取构建时注入的环境变量 LB_VERSION（Dockerfile 从 git tag 传入），
 # 未设置时回落到这里的默认值（桌面版 / 直接跑源码时使用）。
-APP_VERSION = os.environ.get('LB_VERSION') or 'V1.0.5'
+APP_VERSION = os.environ.get('LB_VERSION') or 'V1.0.6'
 if not APP_VERSION.startswith('V'):
     APP_VERSION = 'V' + APP_VERSION
 
@@ -377,6 +377,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', mime)
             self.send_header('Content-Length', str(len(body)))
+            # 静态资源不缓存：改完前端刷新即生效，避免用户看到旧页面
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
@@ -398,6 +402,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', mime)
             self.send_header('Content-Length', str(len(body)))
+            # 静态资源不缓存：改完前端刷新即生效，避免用户看到旧页面
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
