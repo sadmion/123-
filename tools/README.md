@@ -1,6 +1,16 @@
-# tools/ —— 源码还原校验器
+# tools/ —— 校验与运维工具
 
-本目录保留一个工具：**`verify_src.py`**。
+本目录三个工具：
+
+| 工具 | 用途 |
+|---|---|
+| `verify_src.py` | 源码还原校验（比对字节码） |
+| `mem_test.py` | 影库内存测试（诊断「追加影库崩溃」） |
+| `split_library.py` | 影库拆分（降低加载峰值） |
+
+---
+
+# 一、verify_src.py —— 源码还原校验器
 
 ## 它解决什么问题
 
@@ -71,3 +81,90 @@ python tools/verify_src.py server --detail
 | `src/library_store.py` | 66% |
 
 四个模块均已在真实环境验证可正常启动、加载影库、搜索、导出。
+
+---
+
+# 二、mem_test.py —— 影库内存测试
+
+## 它解决什么问题
+
+点「追加影库」后进程**瞬间消失、日志无记录** —— 这是 **OOM** 的典型特征：
+内存被撑爆后内核用 `SIGKILL` 杀进程，不是程序抛异常，所以什么都不打印。
+
+本工具在**本地**（不需要 Docker）测出每个影库的加载内存，
+在你把机器搞崩之前就能看出趋势。
+
+## 用法
+
+```bash
+# 逐个影库加载（每个加载后释放）
+python tools/mem_test.py
+
+# ★ 模拟「追加」：全部保持常驻，复现内存累加
+python tools/mem_test.py --append
+
+# 设定内存上限，超了判定为「会崩」
+python tools/mem_test.py --append --limit 1024
+
+# 对比拆分方案：把拆分目录当小库加载
+python tools/mem_test.py --compare ./瘦身输出
+```
+
+**判读**：看输出最后一行的「当前进程内存」。若接近或超过目标环境可用内存，
+就是会崩。
+
+## 实测参考（192.7 MB / 746,686 条）
+
+| 指标 | 数值 |
+|---|---|
+| 加载后常驻 | 845 MB |
+| 加载峰值 | ~1,500 MB |
+| 加载耗时 | 12.6 秒 |
+
+经验公式：**峰值 ≈ 影库体积 × 7.8**
+
+## 真因（实测定位）
+
+`Library.load()` 里 `json.load` 解析出的**完整原始 dict 无法释放**，
+与解析后的对象同时驻留。tracemalloc 显示：
+
+```
+343 MB   json/decoder.py:361        ← 原始 dict，load() 返回后仍存活
+152 MB   library_store.py:206       ← entry['type'] 字段
+ 47 MB   library_store.py:199       ← entry{'path','etag','size'}
+```
+
+详见根目录 `追加影库崩溃-本地复现与真因.md`。
+
+---
+
+# 三、split_library.py —— 影库拆分
+
+## 它解决什么问题
+
+把大影库拆成多个小库，**降低单次加载峰值**，避免小内存环境加载时 OOM。
+
+⚠️ **注意**：拆分**只降峰值，不降常驻总量**（记录总数不变）。
+实测 192.7 MB 拆成 24 个小库后，常驻 845 MB → 632 MB（仅降 25%）。
+
+## 用法
+
+```bash
+# 查看规模与峰值预估（含顶级分组分布）
+python tools/split_library.py "影库.json" --info
+
+# 按分类目录拆，每库最多 5 万条（推荐）
+python tools/split_library.py "影库.json" --by-dir 50000
+
+# 按条数顺序切块
+python tools/split_library.py "影库.json" --split 50000
+
+# 只留某类
+python tools/split_library.py "影库.json" --filter "电影/" --by-dir 50000
+
+# 预览不落盘
+python tools/split_library.py "影库.json" --by-dir 50000 --dry-run
+```
+
+输出目录默认 `瘦身输出/`，可用 `-o` 改。输出的 JSON 保留原影库元信息结构，
+可直接放回数据目录被程序加载。
