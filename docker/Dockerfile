@@ -39,7 +39,7 @@ COPY docker/entry.py /app/entry.py
 RUN python - <<'PY'
 import compileall, os, sys
 need = ['server.py', 'pan123_api.py', 'tasks.py', 'library_store.py',
-        'index.html', 'style.css', 'app.js']
+        'index.html', 'style.css', 'app.js', 'bgm.mp3']
 miss = [n for n in need if not os.path.exists('/app/src/' + n)]
 if miss:
     sys.exit('缺少文件: %s' % ', '.join(miss))

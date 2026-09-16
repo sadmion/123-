@@ -33,11 +33,12 @@ REQUIRED = [
     "src/index.html",
     "src/style.css",
     "src/app.js",
+    "src/bgm.mp3",
     "docker/entry.py",
 ]
 
 # 前端资源（与源码同放 src/）
-ASSETS = ["index.html", "style.css", "app.js"]
+ASSETS = ["index.html", "style.css", "app.js", "bgm.mp3"]
 
 ok_count = fail_count = 0
 
@@ -241,7 +242,7 @@ time.sleep(2)
 B = 'http://127.0.0.1:' + str(server.HTTP_PORT)
 out = {}
 for p in ('/api/ping', '/api/libs', '/api/login/status',
-          '/', '/style.css', '/app.js'):
+          '/', '/style.css', '/app.js', '/bgm.wav'):
     try:
         r = urllib.request.urlopen(B + p, timeout=20)
         out[p] = (r.status, len(r.read()))
