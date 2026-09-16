@@ -1,74 +1,75 @@
 @echo off
-chcp 65001 >nul
+chcp 65001 >nul 2>nul
 cd /d "%~dp0"
 
 echo.
-echo ================================================================
-echo   123云盘影库搜索工具 - 本地启动
-echo ================================================================
+echo ============================================================
+echo   123 YunPan Library Search - Local Launcher
+echo ============================================================
 echo.
 
-REM ---- 按优先级找「可用的」Python（必须能 import requests）----
-set PYEXE=
+set "PYEXE="
 
-for %%P in (
-    "%~dp0.venv\Scripts\python.exe"
-    "%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
-    "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
-    "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
-    "%LOCALAPPDATA%\Programs\Python\Python310\python.exe"
-    "C:\Python313\python.exe"
-    "C:\Python312\python.exe"
-    "C:\Python311\python.exe"
-) do (
-    if exist %%P (
-        %%P -c "import requests" >nul 2>nul
-        if not errorlevel 1 (
-            set PYEXE=%%~P
-            goto :found
+REM ---- Look for a Python that can import requests ----
+REM 1) project venv
+if exist "%~dp0.venv\Scripts\python.exe" (
+    "%~dp0.venv\Scripts\python.exe" -c "import requests" >nul 2>nul
+    if not errorlevel 1 set "PYEXE=%~dp0.venv\Scripts\python.exe"
+)
+
+REM 2) common install locations
+if not defined PYEXE (
+    for %%D in (
+        "%LOCALAPPDATA%\Programs\Python\Python313"
+        "%LOCALAPPDATA%\Programs\Python\Python312"
+        "%LOCALAPPDATA%\Programs\Python\Python311"
+        "%LOCALAPPDATA%\Programs\Python\Python310"
+        "C:\Python313"
+        "C:\Python312"
+        "C:\Python311"
+    ) do (
+        if not defined PYEXE (
+            if exist "%%~D\python.exe" (
+                "%%~D\python.exe" -c "import requests" >nul 2>nul
+                if not errorlevel 1 set "PYEXE=%%~D\python.exe"
+            )
         )
     )
 )
 
-REM 回退：PATH 里的 python / py
-python -c "import requests" >nul 2>nul
-if not errorlevel 1 (
-    set PYEXE=python
-    goto :found
+REM 3) PATH
+if not defined PYEXE (
+    python -c "import requests" >nul 2>nul
+    if not errorlevel 1 set "PYEXE=python"
 )
-py -3 -c "import requests" >nul 2>nul
-if not errorlevel 1 (
-    set PYEXE=py -3
-    goto :found
+if not defined PYEXE (
+    py -3 -c "import requests" >nul 2>nul
+    if not errorlevel 1 set "PYEXE=py -3"
 )
 
-REM 都没找到 → 给出明确指引
-echo   [错误] 没找到可用的 Python 环境（需要 requests 库）
-echo.
-echo   你机器上可能装了 Python，但缺少 requests 依赖。
-echo   请执行以下任一步骤：
-echo.
-echo     方式一：安装依赖（推荐）
-echo         pip install requests
-echo.
-echo     方式二：如果没有 Python，先安装
-echo         https://www.python.org/downloads/
-echo         （安装时务必勾选 "Add Python to PATH"）
-echo.
-pause
-exit /b 2
+if not defined PYEXE goto :nopython
 
-:found
-echo   使用 Python: %PYEXE%
+echo   Using Python: %PYEXE%
 echo.
+"%PYEXE%" "%~dp0run.py"
+set "RC=%errorlevel%"
+goto :done
 
-%PYEXE% "本地启动.py"
-set RC=%errorlevel%
-
+:nopython
+echo   [ERROR] No usable Python found (needs the "requests" module).
 echo.
-if not "%RC%"=="0" (
-    echo   启动失败（退出码 %RC%），请把上面的信息截图反馈。
-)
-echo   服务已停止。
+echo   Option 1 - Install the dependency (if Python is already installed):
+echo       pip install requests
+echo.
+echo   Option 2 - Install Python first:
+echo       https://www.python.org/downloads/
+echo       IMPORTANT: check "Add Python to PATH" during setup.
+echo.
+set "RC=2"
+
+:done
+echo.
+if not "%RC%"=="0" echo   Launcher exited with code %RC%. Please report the message above.
+echo   Server stopped.
 pause
 exit /b %RC%
