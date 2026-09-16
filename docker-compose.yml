@@ -1,8 +1,8 @@
 # ============================================================
-# 123云盘影库搜索工具 —— Docker Compose 部署
+# 123云盘影库搜索工具 —— Docker Compose 部署（源码版）
 #
 # ★ 方式一（最稳，推荐）：在 NAS 上直接构建
-#     1) 把整个项目目录拷到 NAS（要有 exe 和 docker/ 子目录）
+#     1) 把整个项目目录拷到 NAS（要有 src/ 和 docker/ 子目录）
 #     2) docker compose up -d --build
 #     3) 浏览器访问 http://<NAS的IP>:5890/
 #   不依赖 GHCR / GitHub 网络，只要 NAS 能联网装 pip 依赖即可。
@@ -18,11 +18,15 @@
 # ============================================================
 services:
   pan123-library:
-    # 默认：本地构建，镜像名仅作本地标签用途。
-    # 想改用远程镜像：把下面一行换成
-    #   image: ghcr.io/sadmion/pan123-library:latest
-    # 并删除 build 段。
-    image: pan123-library:1.0.3
+    # 镜像来源二选一：
+    #   · 默认【本地构建】：docker compose up -d --build
+    #     镜像名仅作本地标签用途，用 LB_TAG 控制版本号（默认 latest）。
+    #   · 【拉取远程镜像】：先设 LB_IMAGE 覆盖，再 pull
+    #       LB_IMAGE=ghcr.io/sadmion/pan123-library:latest \
+    #       docker compose pull && docker compose up -d
+    #     ⚠️ 注意镜像名是 pan123-library，不是仓库名 123-（结尾连字符属非法
+    #        镜像名，会导致 invalid reference format）。
+    image: "${LB_IMAGE:-pan123-library}:${LB_TAG:-latest}"
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -41,6 +45,8 @@ services:
       LB_BROWSER: "1"
       # 数据目录（对应下面的数据卷挂载点）
       LB_DATA_ROOT: /data
+      # 容器内访问端口（entry.py 仅用于日志提示；实际监听 5890 由 Dockerfile EXPOSE 决定）
+      LB_PORT: "5890"
 
     volumes:
       # 影库数据 / 登录态持久化。首次启动会自动生成子目录结构。
@@ -51,3 +57,10 @@ services:
       nofile:
         soft: 65536
         hard: 65536
+
+    # 容器内服务仅绑定 0.0.0.0:5890，日志走 stdout，交给 docker 管理
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
