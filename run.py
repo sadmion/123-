@@ -9,11 +9,12 @@
   本文件      是给桌面用的（监听本机、自动开浏览器、数据目录在项目下的 data/）
 
 用法：
-    python 本地启动.py                 # 正常启动，自动开浏览器
-    python 本地启动.py --port 8080     # 换端口
-    python 本地启动.py --dir D:\\影库   # 换数据目录
-    python 本地启动.py --no-browser    # 不自动开浏览器
-    python 本地启动.py --check         # 只做环境自检，不启动
+    python run.py                  # 正常启动，自动开浏览器
+    python run.py --dir D:\影库     # 换数据目录
+    python run.py --no-browser     # 不自动开浏览器
+    python run.py --check          # 只做环境自检，不启动
+
+端口固定从 5890 起，被占用会自动往后找（不需要手动指定）。
 """
 import argparse
 import os

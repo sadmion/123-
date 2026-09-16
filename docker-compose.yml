@@ -7,7 +7,7 @@
 #     3) 浏览器访问 http://<NAS的IP>:5890/
 #   不依赖 GHCR / GitHub 网络，只要 NAS 能联网装 pip 依赖即可。
 #
-# ★ 方式二：拉取现成镜像（需 GHCR 包已设为 Public，见 docker/README.md）
+# ★ 方式二：拉取现成镜像（需 GHCR 包已设为 Public，见 docker/维护手册.md）
 #     docker compose pull && docker compose up -d
 #
 #   查看日志： docker compose logs -f
