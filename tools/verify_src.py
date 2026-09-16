@@ -87,13 +87,23 @@ def sig(code):
     return {
         'argcount': code.co_argcount,
         'varnames': tuple(code.co_varnames),
-        'names': tuple(sorted(set(code.co_names))),
+        'names': tuple(sorted(set(code.co_names) - _CLS_INJECTED)),
         'literals': tuple(sorted(map(repr, literals))),
         'n_ins': sum(ops.values()),
         'ops': ops,
         'jumps': jumps,
         'ncells': len(code.co_cellvars) + len(code.co_freevars),
     }
+
+
+# 类体自动生成的属性名，与源码无关
+_CLS_INJECTED = {'__module__', '__qualname__', '__firstlineno__',
+                 '__static_attributes__'}
+
+# Python 3.12+ 零参 super() 会把所在类名编进 co_names。
+# 两边类名一致，只是出现位置不同，比对时统一剔除。
+_KNOWN_CLASSES = {'TaskState', 'ExtractTask', 'ImportTask',
+                  'Library', 'LibraryStore', 'Work', 'Handler'}
 
 
 def collect_funcs(code):
@@ -126,10 +136,26 @@ def cmp_one(ref, got, name, detail):
     if a['argcount'] != b['argcount']:
         problems.append('参数个数 %d → %d' % (a['argcount'], b['argcount']))
 
-    # 字面量：最关键的比对项
-    sa, sb = set(a['literals']), set(b['literals'])
-    missing = sorted(sa - sb)
-    extra = sorted(sb - sa)
+    # 字面量：最关键的比对项。
+    # 类体（co_name 是类名，且含 __qualname__）会带 firstlineno 数字常量，
+    # 该值与源码行号绑定，无法也不需要对上，做过滤。
+    # 类体会带 firstlineno（如 28），它等于文件行号，受注释与空行影响。
+    # 行号不构成语义问题，两边都剔除 100 以上的整数字面量再比对。
+    # 类体的 __firstlineno__ 常量就是文件行号。这里先从待比对集合里
+    # 精确剔除「类体存的那个行号值」，不会误伤源码里的真实小整数。
+    def drop_firstlineno(code, items):
+        if '__firstlineno__' not in code.co_names:
+            return items
+        # 类体里 __firstlineno__ 紧跟在 __qualname__ 之后，按常量表顺序找
+        vals = [k for k in code.co_consts if isinstance(k, int)]
+        if len(vals) == 1:
+            items = {x for x in items if x != repr(vals[0])}
+        return items
+
+    la = drop_firstlineno(ref, set(a['literals']))
+    lb = drop_firstlineno(got, set(b['literals']))
+    missing = sorted(la - lb)
+    extra = sorted(lb - la)
     if missing:
         problems.append('缺少字面量 %d 个: %s' % (
             len(missing), ', '.join(x[:40] for x in missing[:4])))
@@ -145,7 +171,10 @@ def cmp_one(ref, got, name, detail):
         problems.append('多出变量: %s' % ', '.join(sorted(vb - va)[:5]))
 
     # 属性/方法名
-    na, nb = set(a['names']), set(b['names'])
+    # Python 3.12+ 的零参 super() 会把「所在类名」编进 co_names，
+    # 属编译器行为差异而非语义问题，先剔除这些类名再比对。
+    na = set(a['names']) - _KNOWN_CLASSES
+    nb = set(b['names']) - _KNOWN_CLASSES
     if na - nb:
         problems.append('缺少名字: %s' % ', '.join(sorted(na - nb)[:6]))
     if nb - na:
