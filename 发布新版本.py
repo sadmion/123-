@@ -24,7 +24,7 @@ Docker 部署采用「拉取 GHCR 镜像」方式，所以**版本更新的关�
 ## 它会做什么
 
 1. 校验仓库状态（源码是否更新、是否在 git 仓库里）
-2. 跑 docker/selfcheck.py（13 项构建自检，不需要 Docker）
+2. 跑 docker/selfcheck.py（30 项构建自检，不需要 Docker）
 3. git add/commit（规范化提交信息）
 4. 打 tag 并推送（触发 GitHub Actions 重建镜像）
 5. 打印后续步骤（等 CI、在服务器上 pull）
@@ -131,7 +131,10 @@ def main():
     if a.skip_selfcheck:
         warn("已跳过")
     else:
-        r = run("python docker/selfcheck.py", check=False)
+        # 用当前解释器跑自检，保证与发布脚本处于同一环境
+        # （写死 "python" 可能落到未装依赖的解释器上）
+        _py = '"%s"' % sys.executable
+        r = run('%s docker/selfcheck.py' % _py, check=False)
         text = (r.stdout or "") + (r.stderr or "")
         m = re.search(r"结果：(\d+) 项通过，(\d+) 项失败", text)
         if m:
