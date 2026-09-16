@@ -57,7 +57,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install requests    # Windows
 # .venv/bin/python -m pip install requests          # macOS / Linux
 
-# 启动（Windows 也可直接双击 启动.bat）
+# 启动（Windows 也可直接双击 run.py）
 python run.py
 ```
 
@@ -84,8 +84,7 @@ tools/
   verify_src.py     源码还原校验器（比对源码与原始字节码）
   mem_test.py       影库内存测试（诊断「追加影库崩溃」）
   split_library.py  影库拆分（降低加载峰值）
-run.py              本地启动器（python run.py 或双击）
-启动.bat            Windows 双击启动
+run.py              本地启动器（python run.py 或直接双击）
 发布新版本.py        一键发布（自检 → 提交 → 打 tag → 推送）
 CHANGELOG.md        版本记录
 ```
