@@ -2,48 +2,13 @@
 
 管理 123 云盘「秒传链接」影库的工具：按片名搜索作品、按分类浏览、导出秒传文件、从分享链接提取新影库，并把秒传文件批量导入自己的 123 云盘。
 
-**V1.0.3**
+**V1.0.5** · 源码 + Docker 部署
 
-## 三种使用方式
+## 部署
 
-| 方式 | 适合场景 | 入口 |
-|---|---|---|
-| 桌面版 exe | Windows 本机，双击即用（原生窗口） | `123云盘影库搜索工具.exe` |
-| 浏览器版 exe | Windows 本机，无 WebView2 依赖 | `123云盘影库搜索工具浏览器版.exe` |
-| **Docker / NAS 部署** | 服务器、NAS 长期挂在后台，局域网任意设备访问 | [`docker/README.md`](docker/README.md) |
+镜像已发布到 GitHub 容器仓库（GHCR），支持 `linux/amd64` 与 `linux/arm64`。
 
-三种方式功能完全一致——容器版与 exe 出自同一份构建产物。
-
-详细功能说明见 [`使用说明.md`](使用说明.md)。
-
-> **Docker / NAS 部署请直接看 [`docker/维护手册.md`](docker/维护手册.md)** ——
-> 包含部署、运维命令、数据备份、故障排查、**版本更新流程**。
-> 换新版 exe 后跑 `python 发布新版本.py --version x.y.z --note "说明"` 即可一键完成
-> 「自检 → 提交 → 打 tag → 触发镜像构建」。
-> 桌面版（exe）的那些修复工具在 Docker 部署中**用不到**，手册里有明确说明。
-
-<details>
-<summary>桌面版（双击 exe）常见问题</summary>
-
-> **双击 exe 没反应 / 浏览器打不开？** 先跑 `python 启动修复.py`，多数情况一步解决。
-> 原因与完整排查步骤见 [`打不开怎么办.md`](打不开怎么办.md)。
-
-> **追加影库时程序闪退？** 是大影库导致内存耗尽。用 `python 影库瘦身.py "影库.json" --split-by-dir 50000` 拆成小库即可（实测峰值降低 93%）。
-> 原因与完整步骤见 [`追加影库崩溃-诊断报告.md`](追加影库崩溃-诊断报告.md)。
-
-> **提取时提示「提取失败: 'skipped'」？** 是旧格式断点文件与新版代码不兼容。
-> 跑 `python 断点修复.py --fix` 补齐字段即可（会保留提取进度）。
-> 详见 [`提取失败-skipped-修复.md`](提取失败-skipped-修复.md)。
-
-</details>
-
-> 需要更新版本？见 [`版本更新说明.md`](版本更新说明.md)（含项目形态说明、更新流程、检查清单）。
-
-> 需要更新版本或调整功能？见 [`版本更新说明.md`](版本更新说明.md)（含项目形态说明、三种更新流程、检查清单）。
-
-## Docker 部署（一行起）
-
-镜像已发布到 GitHub 容器仓库，支持 `linux/amd64` 与 `linux/arm64`：
+### 方式一：拉取现成镜像（推荐）
 
 ```bash
 docker run -d --name pan123-library \
@@ -55,9 +20,70 @@ docker run -d --name pan123-library \
   ghcr.io/sadmion/pan123-library:latest
 ```
 
-然后浏览器访问 `http://<机器IP>:5890/`。用 Compose 编排（含端口、数据卷、健康检查）见 [`docker-compose.yml`](docker-compose.yml)，完整部署文档、常见问题与安全提示见 [`docker/README.md`](docker/README.md)。
+然后浏览器访问 `http://<机器IP>:5890/`。
+
+### 方式二：Compose 编排
+
+仓库备有两份可直接使用的 compose 文件：
+
+| 文件 | 用途 |
+|---|---|
+| [`compose-镜像版.yml`](compose-镜像版.yml) | 纯拉取 GHCR 镜像，只需一个文件 + `data` 目录 |
+| [`compose-本地构建.yml`](compose-本地构建.yml) | 从本仓库 `src/` 现场构建，不依赖 GHCR |
+| [`docker-compose.yml`](docker-compose.yml) | 主配置，变量驱动（可构建可拉取，支持换端口/换 tag） |
+
+```bash
+# 镜像版
+curl -O https://raw.githubusercontent.com/sadmion/123-/main/compose-镜像版.yml
+mv compose-镜像版.yml docker-compose.yml
+mkdir -p data && docker compose up -d
+
+# 本地构建版
+git clone https://github.com/sadmion/123-.git && cd 123-
+mkdir -p data && docker compose up -d --build
+```
+
+完整部署、运维命令、数据备份、故障排查见 **[`docker/维护手册.md`](docker/维护手册.md)**。
 
 > 首次拉取若报 `unauthorized`：GHCR 镜像默认私有，到仓库的 `Packages` → `Package settings` 里改成 `Public` 即可。
+
+## 源码结构
+
+```
+src/
+  pan123_api.py     API 封装：登录、分享解析、目录操作、秒传上传
+  tasks.py          后台任务：分享提取（断点续传）、秒传导入
+  library_store.py  影库数据层：加载、分类聚合、搜索、导出
+  server.py         HTTP 服务 + API 路由 + 程序入口
+  index.html        前端页面
+  style.css         样式
+  app.js            前端逻辑
+docker/
+  Dockerfile        镜像构建（直接构建 src/ 源码）
+  entry.py          容器启动器（监听 0.0.0.0、跳过桌面壳、预建数据目录）
+  selfcheck.py      构建自检（30 项，含真实启动探活，不需要 Docker）
+  维护手册.md       Docker 部署运维主手册
+tools/
+  verify_src.py     源码还原校验器（比对源码与原始字节码）
+```
+
+## 发布新版本
+
+改完 `src/` 下的代码后：
+
+```bash
+python 发布新版本.py --version 1.0.6 --note "改了什么"
+```
+
+这条命令会依次完成：**自检 → 提交 → 打 tag → 推送**，GitHub Actions 随后自动构建镜像并推送到 GHCR。
+
+构建完成后，服务器上更新：
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+> 版本号由构建时从 git tag 注入（`LB_VERSION` 环境变量），页面显示的版本与镜像 tag 自动保持一致。
 
 ## 功能速览
 
@@ -69,15 +95,10 @@ docker run -d --name pan123-library \
 - **秒传导入**：Bearer Token / 扫码 / 账号密码三种登录，走官方秒传接口不消耗流量
 - **背景音乐**：内置曲目，可自定义 `bgm.mp3`
 
-## V1.0.3 更新
-
-- 秒传导入兼容 base62 / hex / base64 三种 etag 格式，接口域名更新
-- 扫码登录改为全程复用会话，确认后可正常换取凭据
-- 登录持久化，重启免登录
-- 新增「停止导入」按钮
-- BGM 更换并支持自定义
-- 错误日志写入数据目录 `logs/server.log`
+详细使用说明见 [`使用说明.md`](使用说明.md)，版本变更见 [`版本更新说明.md`](版本更新说明.md)。
 
 ## 安全提醒
 
-本工具没有账号体系，**能访问端口就能使用其中的 123 云盘登录态**。请只在局域网 / 家庭 NAS 使用，不要直接暴露到公网；外网访问请加反向代理认证或走 VPN。登录凭据保存在数据目录的 `记录数据存放目录【勿动】/.login.json`，已在 `.gitignore` 中排除，请勿提交到公开仓库。
+本工具没有账号体系，**能访问端口就能使用其中的 123 云盘登录态**。请只在局域网 / 家庭 NAS 使用，不要直接暴露到公网；外网访问请加反向代理认证或走 VPN。
+
+登录凭据保存在数据目录的 `记录数据存放目录【勿动】/.login.json`，已在 `.gitignore` 中排除，请勿提交到公开仓库。

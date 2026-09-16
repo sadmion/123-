@@ -1,110 +1,73 @@
-# 源码还原工具（CPython 3.13 反编译器）
+# tools/ —— 源码还原校验器
 
-从 `123云盘影库搜索工具.exe` 还原 Python 源码的工具集。
+本目录保留一个工具：**`verify_src.py`**。
 
-## 为什么需要自己写
+## 它解决什么问题
 
-现成反编译工具**全部不支持 Python 3.13**，而本 exe 恰由 3.13 打包：
+本项目的 `src/` 源码是从桌面版 exe 的字节码**逐函数手工还原**出来的
+（现成反编译工具 `decompyle3` / `uncompyle6` 均不支持 Python 3.13）。
 
-| 工具 | 状况 |
+手工还原最大的风险是「**写错但不报错**」——程序能跑，行为却不对。例如：
+
+- 把 `return` 写成 `break` → 遍历目录时遇到分页会**静默丢数据**
+- 把嵌套 `if` 写成 `or` 短路 → 求值顺序变了，边界行为不同
+- 漏掉内层 `try/except` → 出错时不再降级，直接抛异常
+
+这些错误没有语法错误、没有运行时报错，**只能靠机械比对发现**。
+
+## 原理
+
+把还原出的源码编译成字节码，与原始 `.pyc` 里的对应函数逐个比对：
+
+| 比对项 | 能抓到什么 |
 |---|---|
-| decompyle3 | ❌ 源码里 `PYTHON_VERSIONS = {(3,7),(3,8)}`，写死只支持 3.7/3.8 |
-| uncompyle6 | ❌ 同上 |
-| xdis 6.3.0 | ⚠️ 有 3.13 的 opcode 表，但没有语法重建器 |
-| pycdc | ❌ 需 C++ 工具链；官方 release 产物已过期、需登录下载 |
+| 函数清单 | 漏写的函数、多写的函数 |
+| 字面量集合 | 字符串/数字常量抄错、漏写 |
+| 参数名、局部变量名 | 变量漏声明、命名不一致 |
+| 属性/方法名 | 调用错方法、漏调用 |
+| 跳转指令分布 | `if`/`for`/`while`/`try` 的结构差异 |
+| 指令规模偏离度 | 整段逻辑缺失或多余 |
+| 闭包结构 | `cellvars`/`freevars` 丢失（闭包变量被错误外提） |
 
-因此本项目自建反编译器：`decompiler_313.py`（表达式还原）+ `build_src.py`（结构化）。
+已过滤的噪音（不构成语义问题）：类体的 `__firstlineno__` 行号常量、
+编译器注入的属性名、Python 3.12+ 零参 `super()` 编入的类名。
 
 ## 用法
 
 ```bash
-# 1) 从 exe 抽出字节码
-python ../docker/extract_pyinstaller.py "../123云盘影库搜索工具.exe" --linux -o bytecode
+# 校验单个模块
+python tools/verify_src.py server
 
-# 2) 反编译成源码
-python build_src.py bytecode decompiled
+# 校验全部四个模块
+python tools/verify_src.py --all
 
-# 3) 查看某个函数的结构（调试用）
-python cf_313.py bytecode/server.pyc
+# 打印差异明细
+python tools/verify_src.py server --detail
 ```
 
-## 文件说明
+需要 `tools/bytecode/*.pyc` 存在（原始字节码，已从仓库移除，需另行准备）。
 
-| 文件 | 作用 |
+## 如何理解「一致率」
+
+一致率衡量的是**逐指令对齐度**，不是「能不能用」。
+
+- `100%` = 与原字节码逐函数完全一致，可以确信行为等同原程序
+- `< 100%` = 存在写法差异。**多数是无害的**（如 `x if x else y` 与
+  `x or y` 语义等价，但编译出的跳转指令不同），但需要人工确认每一处
+
+判断是否真有问题，看差异描述里的关键词：
+
+- 「缺少字面量 / 变量 / 名字」→ **要警惕**，可能真漏了东西
+- 「分支数不同」→ 要看看是不是漏了分支
+- 「(提示) 跳转写法略有差异，语义可能等价」→ 通常无害
+
+## 当前状态
+
+| 模块 | 一致率 |
 |---|---|
-| `decompiler_313.py` | 表达式栈还原：把字节码指令还原成嵌套表达式；含函数/类签名还原 |
-| `build_src.py` | 结构化还原主程序：在表达式基础上还原 if/for/while/try/with |
-| `cf_313.py` | 控制流分析器（独立工具）：基本块划分、循环与异常作用域识别 |
-| `bytecode/` | 从 exe 抽出的 4 个模块字节码（**还原的唯一依据，请保留**） |
-| `decompiled/` | 反编译产出（需人工校对，见下） |
+| `src/pan123_api.py` | 100% |
+| `src/tasks.py` | 100% |
+| `src/server.py` | 73% |
+| `src/library_store.py` | 66% |
 
-## 当前还原质量
-
-| 模块 | 有效行数 | 干净行 | 覆盖率 |
-|---|---|---|---|
-| **server.py** | 3035 | 2755 | **90%** |
-| **pan123_api.py** | 998 | 851 | **85%** |
-| library_store.py | 1360 | 869 | 63% |
-| tasks.py | 1270 | 961 | 75% |
-| **合计** | 6663 | 5436 | **81%** |
-
-**已可靠还原**：
-- 全部导入语句、模块级常量（`APP_NAME` / `TMDB_KEY_DEFAULT` / `AUTH` / `BGM_MIME` 等）
-- 全部函数与方法签名（参数名、默认值标志、`*args` / `**kwargs`）
-- 类定义与继承（`class Handler(BaseHTTPRequestHandler)`）及**全部方法**（`do_GET`/`do_POST`/`_json`/`_static`/`_body`…）
-- **嵌套闭包函数**（如 `load_auth` 内的 `_verify`）
-- `with` 语句（含 `as` 变量，如 `with open(_auth_file(),'r',encoding='utf-8') as f:`）
-- 单层 `if` / `for` / `while` 结构
-- `try` / `except OSError` 等异常类型识别
-- 大部分表达式（运算、调用、下标、切片 `BINARY_SLICE`、容器、f-string）
-
-**尚不完整**（产出里以注释标注，绝不猜测）：
-- 深度嵌套（>8 层）内部的结构（已做深度保护，退化为平铺而非无限缩进）
-- 布尔短路表达式（`and`/`or` 跳转未合并）
-- 复杂循环体内语句边界（`for` 体含 `try` 时可能提前截断）
-- 默认参数的实际值（字节码只存"有默认值"标志）
-- 生成器/异步函数（`yield` / `await` 语义未完整重建）
-
-## 产出文件的正确用法
-
-⚠️ **`decompiled/` 不能直接运行**，定位是"带标注的逻辑还原稿"：
-
-- `# [控制流]` / `# [未实现]` 标注处逻辑未完整还原
-- `<栈空>` 表示表达式栈错位，需对照字节码补齐
-- **单层结构的函数质量很高，可直接阅读**；深层嵌套需人工校对
-
-**用途**：
-1. **读懂逻辑**（当前主要用途，效果良好）：查找某功能的实现、理解接口参数
-2. **指导改前端**：明确前端调用了哪些接口
-3. **人工补全**：以 `bytecode/` 为唯一权威依据逐函数校对，得到可运行源码
-
-## 校验产出的方法
-
-```bash
-# 语法检查（列出问题行号）
-python -c "compile(open('decompiled/server.py',encoding='utf-8').read(),'s','exec')"
-
-# 对照字节码核对某函数（权威依据）
-python cf_313.py bytecode/server.pyc | less
-```
-
-## 已修复的关键问题（供后续维护参考）
-
-1. **`dis.get_instructions` 递归崩溃**：大函数（1800+ 条指令）会触发 `findlabels` 的 RecursionError。改用 `_unpack_opargs` 线性解析（注意 3.13 返回 **4 元组**）。
-2. **`dis._parse_exception_table` 同样递归**：自实现 varint 解码。
-3. **`LOAD_GLOBAL`/`LOAD_ATTR` 的 arg 带 flag 位**：须 `arg >> 1` 取索引。
-4. **DEREF 类指令使用统一索引空间**：`MAKE_CELL arg=3` 时 `co_cellvars=('t',)` 只有一个元素，arg 需先减去 `len(co_varnames)` 再查。
-5. **`with` 的 ctx 取值顺序**：必须先执行完 ctx 表达式再 `pop()`。
-6. **`POP_JUMP_IF_FALSE` 条件不取反**：then 体是"条件为真"分支。
-7. **异常表里 with 与 try 混用**：用 handler 处是否出现 `CHECK_EXC_MATCH` 区分（`kind="except"` / `"cleanup"`）。
-8. **缩进爆炸**：嵌套过深时退化平铺（`MAX_INDENT=8`）。
-
-## 后续可提升的方向
-
-按性价比排序：
-
-1. **布尔短路合并**：识别 `JUMP_IF_*_OR_POP` 模式 → `and` / `or`
-2. **循环体边界修正**：`for` 体内含 `try` 时的截断问题
-3. **默认参数还原**：跟踪模块级 `LOAD_CONST <默认值元组> | MAKE_FUNCTION | SET_FUNCTION_ATTRIBUTE 1`
-4. **生成器/异步**：`RETURN_GENERATOR` / `SEND` / `YIELD_VALUE` 语义重建
-5. **`library_store.py` 提升**：当前 63% 最低，含较多深层嵌套
+四个模块均已在真实环境验证可正常启动、加载影库、搜索、导出。

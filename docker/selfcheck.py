@@ -36,7 +36,7 @@ REQUIRED = [
     "docker/entry.py",
 ]
 
-# 前端资源（从 exe 抽出，与源码同放 src/）
+# 前端资源（与源码同放 src/）
 ASSETS = ["index.html", "style.css", "app.js"]
 
 ok_count = fail_count = 0

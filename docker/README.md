@@ -13,7 +13,7 @@
 **1) 把项目取到服务器上**（任选一种）
 
 ```bash
-# A. 直接克隆仓库（推荐，最省事；仓库已含 exe，约 87MB）
+# A. 直接克隆仓库（推荐，最省事；仓库已含 src/ 源码，约 200KB）
 git clone https://github.com/sadmion/123-.git
 cd 123-
 
@@ -29,7 +29,7 @@ docker compose up -d --build
 http://<机器的IP>:5890/
 ```
 
-首次构建约 2~5 分钟（拉基础镜像 + 装依赖 + 从 exe 抽包）。**这是最不容易出问题的方式**，推荐优先使用。
+首次构建约 2~5 分钟（拉基础镜像 + 装依赖 + 编译源码）。**这是最不容易出问题的方式**，推荐优先使用。
 
 > 构建前可先自检，无需 Docker 也能跑，能提前发现文件缺失等问题：
 > ```bash
@@ -82,7 +82,7 @@ docker compose logs -f     # 看到下面这行即正常
 
 ### 极简部署：只拷一个文件到目标服务器
 
-不想克隆整个仓库（仓库里有 60MB 的 exe 影库清单），可直接在目标服务器建一个目录，放下面这个 `docker-compose.yml` 即可：
+不想克隆整个仓库，可直接在目标服务器建一个目录，放下面这个 `docker-compose.yml` 即可：
 
 ```yaml
 services:
@@ -109,9 +109,9 @@ services:
 ├── docker-compose.yml          # 编排文件（根目录）
 ├── .github/workflows/          # 自动构建镜像的 CI 配置
 ├── docker/
-│   ├── Dockerfile              # 镜像构建
+│   ├── Dockerfile              # 镜像构建（直接构建 src/ 源码）
 │   ├── entry.py                # 容器启动器（容器适配层）
-│   └── extract_pyinstaller.py  # 构建时从 exe 抽字节码
+│   └── selfcheck.py            # 构建自检（30 项，含启动探活）
 └── data/                       # ← 所有运行数据都在这（自动创建，已被 .gitignore 排除）
     ├── 秒传文件导入或追加/      # 你的影库 JSON 放这里
     ├── 秒传文件导出/            # 导出的秒传文件
@@ -137,22 +137,18 @@ LB_PORT=8080 docker compose up -d     # 换宿主机端口为 8080
 docker compose exec pan123-library ls /data    # 进容器查看数据目录
 ```
 
-## 五、工作原理（为什么 Windows 的 exe 能在 Linux 容器里跑）
+## 五、工作原理
 
-exe 是 PyInstaller 单文件产物，里面装的是 **CPython 3.13 字节码**，本身与操作系统无关——真正不能跨平台的是它的 Windows 引导器和一堆 `.dll/.pyd`。于是镜像构建时：
+镜像**直接构建本仓库 `src/` 下的源码**，不依赖任何 Windows 产物：
 
-1. `extract_pyinstaller.py` 解析 exe 里的 PyInstaller 归档（含 overlay 偏移换算），取出：
-   - 入口脚本 `server.pyc`
-   - 自有模块 `pan123_api.pyc`、`tasks.pyc`、`library_store.pyc`（取自 PYZ）
-   - 前端资源 `index.html` / `style.css` / `app.js` / `bgm.mp3`
-   - 丢弃所有 `.dll/.pyd` 等 Windows 专用二进制
-2. 用镜像内 Python 的 magic 重写 pyc 头（exe 由 3.13 早期小版本编译，magic 与新版不同，照搬会 `bad magic number`）
-3. `entry.py` 以 `__main__` 方式加载并执行 `server.pyc`，同时做三项容器适配：
+1. `docker/Dockerfile` 用 `COPY src/ /app/src/` 把源码与前端资源放进镜像
+2. 构建期执行自检：校验 7 个必需文件齐备、`compileall` 全部通过
+3. `entry.py` 导入 `src/server.py` 并启动，同时做三项容器适配：
    - 程序内部硬编码监听 `127.0.0.1` → 改写为 `0.0.0.0`
    - 屏蔽 pywebview 桌面窗口与 `webbrowser` 拉起（容器无 GUI），改为打印访问地址
    - 提前创建数据目录（程序要求目录必须已存在，否则会转去弹 tkinter 选择框并退出）
 
-业务代码**一行未改**——后续用 PyInstaller 重新打包 exe 后，重新构建镜像即可同步更新。
+因此**改代码 → 重建镜像**即可生效，无需重新打包 exe。
 
 ## 六、常见问题
 
