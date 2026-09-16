@@ -95,6 +95,7 @@ jobs:
           docker buildx build \
             --file docker/Dockerfile \
             --platform "${PLATFORMS}" \
+            --build-arg "APP_VERSION=${VERSION}" \
             --tag "${IMAGE}:${VERSION}" \
             --tag "${IMAGE}:latest" \
             --push \

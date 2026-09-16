@@ -10,12 +10,17 @@ LABEL org.opencontainers.image.title="123云盘影库搜索工具" \
       org.opencontainers.image.description="123云盘秒传影库管理工具 V1.0.3（Docker 源码版）" \
       org.opencontainers.image.source="https://github.com/sadmion/123-"
 
+# 版本号：由 CI 从 git tag 传入（--build-arg APP_VERSION=1.0.5）。
+# 未传时为 "dev"，页面显示 dev 便于区分"非发布构建"。
+ARG APP_VERSION="dev"
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     LB_BROWSER=1 \
     LB_DATA_ROOT=/data \
     APP_DIR=/app \
-    TZ=Asia/Shanghai
+    TZ=Asia/Shanghai \
+    LB_VERSION="V${APP_VERSION}"
 
 WORKDIR /app
 

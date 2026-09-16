@@ -22,7 +22,13 @@ from tasks import TASKS, ExtractTask, ImportTask
 from library_store import LibraryStore
 
 APP_NAME = '123云盘影库搜索工具'
-APP_VERSION = 'V1.0.3'
+
+# 版本号：优先取构建时注入的环境变量 LB_VERSION（Dockerfile 从 git tag 传入），
+# 未设置时回落到这里的默认值（桌面版 / 直接跑源码时使用）。
+APP_VERSION = os.environ.get('LB_VERSION') or 'V1.0.5'
+if not APP_VERSION.startswith('V'):
+    APP_VERSION = 'V' + APP_VERSION
+
 TMDB_KEY_DEFAULT = '3fd2be6f0c70a2a598f084ddfb75487c'
 TMDB_IMG = 'https://image.tmdb.org/t/p/w342'
 
