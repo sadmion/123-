@@ -34,6 +34,13 @@ __pycache__/
 *.pyc
 *.pyo
 
+# ===== 本地虚拟环境（各人各建，不入库）=====
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+
 # ===== 系统文件 =====
 Thumbs.db
 desktop.ini

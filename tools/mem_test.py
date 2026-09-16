@@ -111,6 +111,11 @@ def main():
                     help='对比：把该目录下所有 json 当成「拆分后的小库」加载')
     ap.add_argument('--limit', type=float, default=0,
                     help='内存上限(MB)，超出则判定为会崩')
+    ap.add_argument('--plan', action='store_true',
+                    help='粗筛预估（不加载，毫秒级）。'
+                         '注意：只按体积估算，系数因字段完整度而异（实测 3~4.4），'
+                         '偏保守，用于快速识别明显超标的库；'
+                         '要准确判断请用 --append 实测')
     ap.add_argument('--json', action='store_true', help='输出 JSON')
     args = ap.parse_args()
 
@@ -155,6 +160,61 @@ def main():
         print('  内存上限  : %.0f MB（超出判定为会崩）' % args.limit)
 
     kept = []
+
+    if args.plan:
+        # 粗筛：不加载，只按体积估。系数实测在 3~4.4 之间（取决于记录里
+        # 带多少可选字段），这里取 4.4 偏保守，用于快速识别明显超标的库。
+        # 峰值另加一次加载峰值（待加载库之间不会叠加峰值）。
+        K_RES = 4.4       # 常驻系数（偏保守）
+        K_PEAK = 7.8      # 单库加载峰值系数
+        print()
+        print('=== 粗筛预估（不加载，偏保守）===')
+        print('%-44s %9s %11s' % ('文件', '体积MB', '常驻估算MB'))
+        print('-' * 68)
+        sizes = []
+        for n in files:
+            sz = os.path.getsize(os.path.join(imp, n)) / 1048576
+            sizes.append((n, sz))
+            flag = '⚠' if sz * K_RES > 700 else ' '
+            print('%-44s %9.1f %11.1f %s'
+                  % (n[:44], sz, sz * K_RES, flag))
+        print('-' * 68)
+        tot_sz = sum(s for _, s in sizes)
+        tot_res = tot_sz * K_RES
+        biggest = max((s for _, s in sizes), default=0)
+        peak_est = tot_res - biggest * K_RES + biggest * K_PEAK
+        print('%-44s %9.1f %11.1f' % ('合计', tot_sz, tot_res))
+        print()
+        print('  常驻合计   : %.0f MB' % tot_res)
+        print('  峰值估算   : %.0f MB  （常驻 + 最大单库的加载瞬时增量）'
+              % peak_est)
+        print('  ⚠ 体积系数因字段完整度而异（实测 3.0~4.4），此估算偏保守。')
+        print('     准确判断请跑：python tools/mem_test.py --append')
+        print()
+        avail = sys_avail_mb()
+        print('  本机可用内存: %s MB' % fmt(avail))
+        if args.limit:
+            print('  容器内存上限: %.0f MB' % args.limit)
+            print()
+            print('  提醒：目录里的库会在**启动时全部加载**'
+                  '（LibraryStore.__init__ 调 scan(initial=True)），')
+            print('        watcher 每 3 秒扫一次，新增文件会立即加载 ——'
+                  ' 这就是「放进目录就崩」的原因。')
+            print()
+            ratio = peak_est / args.limit
+            if ratio > 1.0:
+                print('  ★ 判定：⚠⚠ 很可能崩（估算峰值 %.0f > 上限 %.0f）'
+                      % (peak_est, args.limit))
+                print('      建议：上限提到 %.0f MB 以上，'
+                      '或用 tools/split_library.py 拆分' % (peak_est * 1.3))
+            elif ratio > 0.7:
+                print('  ★ 判定：⚠ 风险偏高（估算峰值占上限 %.0f%%）'
+                      % (ratio * 100))
+                print('      运行期再加库可能就会崩')
+            else:
+                print('  ★ 判定：✓ 看起来安全（估算峰值占上限 %.0f%%）'
+                      % (ratio * 100))
+        return 0
 
     if args.compare:
         # 拆分方案对比
