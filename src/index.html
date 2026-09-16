@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>123云盘影库搜索工具</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 顶栏 -->
+<header class="topbar">
+  <div class="music-panel" id="musicPanel">
+    <div class="disc">♪</div>
+    <div class="bars"><i></i><i></i><i></i></div>
+    <button class="music-btn" id="musicBtn">❚❚</button>
+  </div>
+  <h1>123云盘影库搜索工具</h1>
+  <span class="ver" id="verInfo"></span>
+</header>
+
+<div class="layout">
+
+  <!-- ══════ 左面板 ══════ -->
+  <aside class="left-panel">
+    <div class="panel-card">
+      <h3><span class="ico">⚙️</span>影库操作</h3>
+      <div class="row">
+        <button class="btn sm" id="btnOpenDir">📁 打开目录</button>
+        <button class="btn sm" id="btnAppend">📂 追加入库</button>
+        <button class="btn sm" id="btnRefreshL">🔄 刷新</button>
+      </div>
+      <div class="muted" style="margin-top:8px" id="libSummary"></div>
+    </div>
+
+    <!-- 分享提取 -->
+    <div class="panel-card">
+      <h3><span class="ico">🔗</span>秒传提取 · 分享入库</h3>
+      <label class="label">分享链接（可含提取码）</label>
+      <textarea class="input" id="shareLink" rows="2" placeholder="https://www.123pan.com/s/xxxx  提取码:abcd"></textarea>
+      <div class="row">
+        <div style="flex:1">
+          <label class="label">作品片名（留空自动识别）</label>
+          <input class="input" id="shareTitle" placeholder="如: 流浪地球2 (2023)">
+        </div>
+      </div>
+      <div class="row">
+        <div style="flex:1">
+          <label class="label">归入一级分类</label>
+          <select class="input" id="shareCat1"><option value="">保持原结构</option></select>
+        </div>
+        <div style="flex:1">
+          <label class="label">二级分类</label>
+          <select class="input" id="shareCat2"><option value="">无</option></select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm" id="btnBrowseShare" style="background:var(--ok-soft);color:var(--ok);border-color:var(--ok)">📁 浏览分享</button>
+        <button class="btn sm green" id="btnExtract">🚀 开始提取并入库</button>
+        <button class="btn sm" id="btnFileTypes">⚙ 类型</button>
+      </div>
+      <div class="progress-box" id="extractProgress">
+        <div id="extractStep">准备中…</div>
+        <div class="progress-bar"><i id="extractBar"></i></div>
+        <div class="muted" id="extractNums"></div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn sm" id="btnExtractStop">✋ 停止</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 秒传导入 -->
+    <div class="panel-card">
+      <h3><span class="ico">☁️</span>秒传导入 · 123云盘</h3>
+      <div id="loginArea">
+        <div class="row">
+          <button class="btn sm orange" id="btnQrLogin">📱 扫码登录</button>
+          <button class="btn sm" id="btnTokenLogin">🔑 Token登录</button>
+          <button class="btn sm" id="btnPwdLogin">🔐 账密登录</button>
+        </div>
+        <div id="qrBox" style="display:none;text-align:center;margin-top:8px">
+          <img class="qr-img" id="qrImg" alt="二维码">
+          <div class="muted" id="qrStatus">等待扫码…</div>
+          <div class="row" style="justify-content:center;margin-top:6px">
+            <button class="btn sm" id="btnQrRefresh">🔄 刷新二维码</button>
+            <button class="btn sm" id="btnCopyQr">📋 复制登录链接</button>
+          </div>
+        </div>
+        <div id="tokenBox" style="display:none;margin-top:8px">
+          <input class="input" id="tokenInput" placeholder="粘贴 Bearer Token">
+          <button class="btn sm" style="margin-top:6px" id="btnTokenGo">🔑 使用此 Token 登录</button>
+        </div>
+        <div id="pwdBox" style="display:none;margin-top:8px">
+          <input class="input" id="pwdUser" placeholder="手机号/邮箱">
+          <input class="input" id="pwdPass" type="password" placeholder="密码" style="margin-top:6px">
+          <button class="btn sm" style="margin-top:6px" id="btnPwdGo">🔐 登录</button>
+        </div>
+      </div>
+      <div id="userArea" style="display:none">
+        <div class="row" style="justify-content:space-between">
+          <span>👤 <b id="nickShow"></b> <span class="muted" id="uidShow"></span></span>
+          <button class="btn sm" id="btnLogout">退出</button>
+        </div>
+      </div>
+      <hr style="border:none;border-top:1px dashed var(--rule);margin:10px 0">
+      <label class="label">选择秒传 JSON</label>
+      <div class="row">
+        <select class="input" id="importFile" style="flex:1"></select>
+        <button class="btn sm" id="btnUploadJson">⬆ 外部</button>
+      </div>
+      <label class="label" style="margin-top:8px">目标目录（如 /电影/印度电影/）</label>
+      <input class="input" id="importTarget" placeholder="留空=根目录">
+      <label class="row" style="margin-top:8px;font-size:12.5px;cursor:pointer">
+        <input type="checkbox" id="autoCommon" checked> 自动按 commonPath 建/找子目录
+      </label>
+      <button class="btn primary" style="width:100%;margin-top:8px" id="btnImport">☁️ 开始秒传导入</button>
+      <button class="btn danger" style="width:100%;margin-top:8px;display:none" id="btnImportStop">⏹ 停止导入</button>
+      <div class="progress-box" id="importProgress">
+        <div id="importStep">准备中…</div>
+        <div class="progress-bar"><i id="importBar"></i></div>
+        <div class="muted" id="importNums"></div>
+        <div class="log-box" id="importLog"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══════ 中间主区 ══════ -->
+  <main class="center-panel">
+    <div class="search-bar">
+      <div class="lib-select">
+        <button class="btn" id="btnLibDrop">📚 影库 <span id="libSelCount"></span> ▾</button>
+        <div class="lib-dropdown" id="libDropdown"></div>
+      </div>
+      <input class="input" id="searchInput" placeholder="输入片名关键词（至少2个字），Enter 搜索" style="max-width:420px">
+      <button class="btn primary" id="btnSearch">🔍 搜索</button>
+      <button class="btn" id="btnRefresh">🔄 刷新</button>
+      <button class="btn" id="btnHelp">❓ 功能</button>
+    </div>
+
+    <div class="cat-zone">
+      <div class="cat-head">
+        <b style="font-size:13.5px">📂 分类浏览</b>
+        <div class="row">
+          <button class="btn sm" id="btnSubcat">子分类 ▾</button>
+          <button class="btn sm" id="btnMulti">☑ 合并导出</button>
+        </div>
+      </div>
+      <div class="cat-wrap folded" id="catWrap">
+        <div class="cat-lines" id="catLines"></div>
+      </div>
+      <button class="expand-more" id="btnExpandMore">展开更多 ▾</button>
+      <div class="subcat-zone" id="subcatZone"></div>
+      <div id="multiBar" style="display:none;margin-top:8px" class="row">
+        <span class="tag blue" id="multiCount">已选 0 个分类</span>
+        <button class="btn sm primary" id="btnMergeGo">📤 合并导出选中分类</button>
+        <button class="btn sm" id="btnMultiClear">清空选择</button>
+        <button class="btn sm" id="btnMultiExit">☑ 退出多选</button>
+      </div>
+    </div>
+
+    <div class="result-zone">
+      <div class="result-meta" id="resultMeta"></div>
+      <div class="year-filter" id="yearFilter"></div>
+      <div class="work-list" id="workList"></div>
+      <div class="empty-tip" id="emptyTip" style="display:none">
+        <span class="big">🎬</span>
+        <span id="emptyText">请将 *.json 放入「秒传文件导入或追加/」目录</span>
+      </div>
+      <div class="pager" id="pager"></div>
+    </div>
+  </main>
+
+  <!-- ══════ 右面板 ══════ -->
+  <aside class="right-panel">
+    <div class="panel-card">
+      <h3><span class="ico">📊</span>存储分析</h3>
+      <div class="donut-wrap"><canvas id="donut" width="190" height="190"></canvas></div>
+      <div class="legend" id="donutLegend"></div>
+      <div class="bar-chart" id="barChart"></div>
+    </div>
+    <div class="panel-card">
+      <h3><span class="ico">🕘</span>搜索历史
+        <button class="btn sm" id="btnHistClear" style="margin-left:auto">清空</button>
+      </h3>
+      <div class="hist-list" id="histList"></div>
+    </div>
+    <div class="panel-card">
+      <h3><span class="ico">🎬</span>TMDB 海报 Key</h3>
+      <div class="row">
+        <input class="input" id="tmdbKey" placeholder="留空使用内置公开 Key" style="flex:1">
+        <button class="btn sm" id="btnTmdbSave">保存</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- 浏览分享弹窗 -->
+<div class="modal-mask" id="browseMask">
+  <div class="modal">
+    <div class="modal-head">
+      <b>📁 浏览分享</b>
+      <button class="modal-close" data-close="browseMask">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="crumb" id="crumb"></div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn sm" id="btnSelAll">☐ 全选</button>
+        <span class="muted" id="browseStat"></span>
+      </div>
+      <div id="browseList" style="max-height:46vh;overflow-y:auto"></div>
+      <div class="row" style="margin-top:12px;justify-content:flex-end">
+        <button class="btn sm" id="btnFileTypeSet">⚙ 文件类型过滤</button>
+        <button class="btn sm green" id="btnExtractSel">📂 提取选中入库</button>
+        <button class="btn sm green" id="btnExtractAll">📦 提取全部入库</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 文件类型过滤弹窗 -->
+<div class="modal-mask" id="ftMask">
+  <div class="modal" style="width:480px">
+    <div class="modal-head"><b>提取文件类型过滤</b>
+      <button class="modal-close" data-close="ftMask">✕</button></div>
+    <div class="modal-body">
+      <div class="muted">未勾选的类型将被跳过</div>
+      <div class="ft-grid" id="ftGrid"></div>
+      <div class="row">
+        <button class="btn sm" id="btnFtVideo">仅视频</button>
+        <button class="btn sm" id="btnFtAll">全选</button>
+        <button class="btn sm" id="btnFtNone">全不选</button>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px">
+        <button class="btn primary" id="btnFtOk">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 功能说明弹窗 -->
+<div class="modal-mask" id="helpMask">
+  <div class="modal" style="width:640px">
+    <div class="modal-head"><b>❓ 功能说明</b>
+      <button class="modal-close" data-close="helpMask">✕</button></div>
+    <div class="modal-body" id="helpBody"></div>
+  </div>
+</div>
+
+<input type="file" id="jsonFileInput" accept=".json" style="display:none">
+<audio id="bgm" src="bgm.wav" loop preload="auto"></audio>
+
+<script src="app.js"></script>
+</body>
+</html>
