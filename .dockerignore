@@ -32,6 +32,8 @@ _work
 
 # ===== 文档与编排文件不影响镜像内容 =====
 docker-compose.yml
+compose-镜像版.yml
+compose-本地构建.yml
 docker/README.md
 README.md
 使用说明.md

@@ -1,0 +1,52 @@
+# ============================================================
+# 123云盘影库搜索工具 —— Docker Compose（本地构建版）
+#
+# 用法（在项目目录下执行）：
+#   docker compose -f compose-本地构建.yml up -d --build
+#   浏览器访问 http://<这台机器的IP>:5890/
+#
+# 与「镜像版」的区别：本文件会用当前目录的源码现场构建镜像，
+# 不依赖 GHCR，也不需要 exe。改完 src/ 里的代码重新 build 即可。
+#
+# 升级：docker compose -f compose-本地构建.yml up -d --build
+# 日志：docker compose -f compose-本地构建.yml logs -f
+# 停止：docker compose -f compose-本地构建.yml down    （data/ 数据不受影响）
+# ============================================================
+services:
+  pan123-library:
+    # 本地构建出的镜像名，仅作本地标签
+    image: pan123-library:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+
+    container_name: pan123-library
+    restart: unless-stopped
+
+    # 宿主机端口:容器端口。想换端口改左边，例如 "8080:5890"
+    ports:
+      - "5890:5890"
+
+    environment:
+      TZ: Asia/Shanghai
+      # 容器内没有 GUI，跳过 pywebview 桌面窗口
+      LB_BROWSER: "1"
+      # 数据目录（对应下面的挂载点）
+      LB_DATA_ROOT: /data
+
+    volumes:
+      # 影库 JSON、导出文件、登录凭据、日志都在这里，删容器不会丢
+      - ./data:/data
+
+    # 秒传批量导入是 IO + 网络密集，给足文件句柄
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    # 限制日志体积，避免长期运行撑爆磁盘
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
